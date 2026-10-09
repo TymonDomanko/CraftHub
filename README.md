@@ -91,15 +91,14 @@ cargo build --release
 
 ## Publishing a release
 
-1. Bump `version` in `Cargo.toml` (e.g. `2.0.1`) and commit.
-2. Tag and push:
-   ```bash
-   git tag v2.0.1
-   git push origin main v2.0.1
-   ```
+1. Bump `version` in `Cargo.toml` (e.g. `2.0.1`), commit and push.
+2. Create the release, either way:
+   - On GitHub: **Releases → Draft a new release**, create the tag `v2.0.1`, then **Publish**.
+   - Or from a terminal: `git tag v2.0.1 && git push origin v2.0.1`
 
-The [Release workflow](.github/workflows/release.yml) builds the binary, writes `SHA256SUMS.txt`
-and publishes the GitHub release. Everyone's Craft Hub then offers the update.
+The [Release workflow](.github/workflows/release.yml) builds the binary (it checks the tag
+matches `Cargo.toml`), writes `SHA256SUMS.txt` and attaches both to the release, usually within
+5 minutes. Everyone's Craft Hub then offers the update.
 
 ## Credits
 

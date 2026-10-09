@@ -1,14 +1,22 @@
-# Builds Craft Hub and publishes a GitHub release when a version tag is pushed:
-#   git tag v2.0.1 && git push origin v2.0.1
+# Builds Craft Hub and attaches it to a GitHub release. Either:
+#   - push a version tag:  git tag v2.0.1 && git push origin v2.0.1
+#   - or on GitHub: Releases -> Draft a new release -> tag v2.0.1 -> Publish
 # Craft Hub's "Update Craft Hub" button downloads the binary from the latest release.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
 
 permissions:
   contents: write
+
+# Publishing a release on GitHub can fire both triggers; run them one at a time.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -47,6 +55,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Craft Hub ${GITHUB_REF_NAME#v}" \
-            --generate-notes
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "Craft Hub ${GITHUB_REF_NAME#v}" \
+              --generate-notes
+          fi
