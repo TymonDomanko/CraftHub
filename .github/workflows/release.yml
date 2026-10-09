@@ -1,47 +1,65 @@
-# Builds Craft Hub and attaches it to a GitHub release. Either:
-#   - push a version tag:  git tag v2.0.1 && git push origin v2.0.1
-#   - or on GitHub: Releases -> Draft a new release -> tag v2.0.1 -> Publish
+# Builds Craft Hub and publishes it as a GitHub release.
+#
+# Releasing a new version: bump `version` in Cargo.toml and push to main. If there's no
+# release for that version yet, this builds it and publishes `v<version>` automatically.
+# (Pushing a `v*` tag, or publishing a release on GitHub, also works.)
+#
 # Craft Hub's "Update Craft Hub" button downloads the binary from the latest release.
 name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
-# Publishing a release on GitHub can fire both triggers; run them one at a time.
+# Several triggers can fire for one version; run them one at a time.
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
     # Built on Ubuntu 22.04 (glibc 2.35) so it runs on Linux Mint 21 and newer.
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Check the tag matches Cargo.toml
+      - name: Work out the version
+        id: version
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+          tag="v$version"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
             echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
             exit 1
           fi
+          if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null \
+             | grep -qx "crafthub-linux-x86_64"; then
+            echo "Release $tag already has its binary; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
+        if: steps.version.outputs.skip != 'true'
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
 
       - name: Test
+        if: steps.version.outputs.skip != 'true'
         run: cargo test --locked
 
       - name: Build
+        if: steps.version.outputs.skip != 'true'
         run: |
           cargo build --release --locked
           mkdir dist
@@ -52,13 +70,15 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Publish release
+        if: steps.version.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/* \
-              --title "Craft Hub ${GITHUB_REF_NAME#v}" \
-              --generate-notes
+            gh release create "$TAG" dist/* \
+              --target "$GITHUB_SHA" \
+              --title "Craft Hub ${TAG#v}" \
+              --notes-file .github/release-notes.md
           fi
