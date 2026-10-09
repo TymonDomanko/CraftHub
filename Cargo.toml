@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.95"
 description = "One-click installer and updater for the ArtCraft Crafting Apps on Linux"
 license = "MIT"
-repository = "https://github.com/TymonDomanko/crafthub"
+repository = "https://github.com/TymonDomanko/CraftHub"
 authors = ["Tymon Domanko"]
 
 [dependencies]

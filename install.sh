@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Install Craft Hub for the current user (no sudo needed):
-#   curl -fsSL https://raw.githubusercontent.com/TymonDomanko/crafthub/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/TymonDomanko/CraftHub/main/install.sh | bash
 set -euo pipefail
 
-REPO="TymonDomanko/crafthub"
+REPO="TymonDomanko/CraftHub"
 case "$(uname -m)" in
   x86_64 | amd64) ARCH=x86_64 ;;
   *) echo "Sorry, there's no Craft Hub build for $(uname -m) yet." >&2; exit 1 ;;

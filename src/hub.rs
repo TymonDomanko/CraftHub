@@ -12,7 +12,7 @@ use crate::install;
 use crate::paths;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_REPO: &str = "TymonDomanko/crafthub";
+const DEFAULT_REPO: &str = "TymonDomanko/CraftHub";
 const ICON_SVG: &[u8] = include_bytes!("../assets/icons/crafthub.svg");
 pub const ICON_PNG: &[u8] = include_bytes!("../assets/icons/crafthub.png");
 

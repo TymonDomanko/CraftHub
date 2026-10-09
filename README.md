@@ -21,10 +21,10 @@ Built for Linux Mint, and works on other Ubuntu/Debian-based distros too. Writte
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TymonDomanko/crafthub/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TymonDomanko/CraftHub/main/install.sh | bash
 ```
 
-Or download `crafthub-linux-x86_64` from the [latest release](https://github.com/TymonDomanko/crafthub/releases/latest),
+Or download `crafthub-linux-x86_64` from the [latest release](https://github.com/TymonDomanko/CraftHub/releases/latest),
 make it executable (`chmod +x crafthub-linux-x86_64`) and run it. Either way, Craft Hub copies
 itself to `~/.local/bin/crafthub` and adds itself to your menu. No password needed.
 
