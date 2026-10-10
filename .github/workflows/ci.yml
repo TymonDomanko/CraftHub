@@ -9,6 +9,11 @@ on:
 env:
   CARGO_TERM_COLOR: never
 
+# contents: write lets the Windows/macOS jobs publish their window screenshot to a
+# ci-screenshots/<runner> branch, so it can be looked at without downloading artifacts.
+permissions:
+  contents: write
+
 jobs:
   lint:
     runs-on: ubuntu-22.04
@@ -65,13 +70,20 @@ jobs:
           bin=target/debug/crafthub
           [ "$RUNNER_OS" = Windows ] && bin=target/debug/crafthub.exe
           bash .github/scripts/screenshot.sh "$bin" screenshot.png
-      - uses: actions/upload-artifact@v4
-        if: runner.os != 'Linux'
+      - name: Publish screenshot
+        if: runner.os != 'Linux' && github.event_name == 'push'
         continue-on-error: true
-        with:
-          name: screenshot-${{ matrix.os }}
-          path: screenshot.png
-          if-no-files-found: ignore
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          [ -f screenshot.png ] || exit 0
+          mkdir shot && cp screenshot.png shot/ && cd shot
+          git init -q -b main
+          git add screenshot.png
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com \
+            commit -q -m "Craft Hub on ${{ matrix.name }} (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY" \
+            "HEAD:refs/heads/ci-screenshots/${{ matrix.os }}"
 
   macos-bundle:
     name: macOS app bundle
