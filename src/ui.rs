@@ -784,7 +784,8 @@ impl HubApp {
                         pal,
                         egui::ProgressBar::new(f)
                             .desired_width(160.0)
-                            .desired_height(8.0),
+                            .desired_height(8.0)
+                            .fill(pal.accent),
                     );
                 }
             } else if let Some((note, is_err)) = &s.hub_note {
