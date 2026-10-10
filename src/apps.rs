@@ -19,6 +19,7 @@ pub struct App {
     /// The Adobe app it is an alternative to, if any.
     pub like: Option<&'static str>,
     /// freedesktop menu categories.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub category: &'static str,
     pub blurb: &'static str,
     /// Path of the documentation inside the repo (the projects have no GitHub wiki).
@@ -58,6 +59,7 @@ impl App {
         }
     }
     /// One-line description for the menu entry.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn comment(&self) -> &'static str {
         let end = self.blurb.find(['.', ':']).unwrap_or(self.blurb.len());
         &self.blurb[..end]
