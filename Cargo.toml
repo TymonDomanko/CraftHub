@@ -1,6 +1,6 @@
 [package]
 name = "crafthub"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2024"
 rust-version = "1.95"
 description = "One-click installer and updater for the ArtCraft Crafting Apps on Linux, Windows and macOS"
