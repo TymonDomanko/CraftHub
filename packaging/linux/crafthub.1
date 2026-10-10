@@ -1,0 +1,53 @@
+.TH CRAFTHUB 1 "" "Craft Hub" "User Commands"
+.SH NAME
+crafthub \- install, update and uninstall the Crafting Apps
+.SH SYNOPSIS
+.B crafthub
+[\fIOPTION\fR]
+.SH DESCRIPTION
+Craft Hub is a manager for the ArtCraft Crafting Apps (PhotoCraft, VectorCraft, DesignCraft,
+LightCraft, FilmCraft, EffectCraft, PDFCraft and ArtCraft). Without options it opens its window.
+Apps are installed for the current user only.
+.SH OPTIONS
+.TP
+.BI \-\-install " ID"
+Install an app, for example \fIphotocraft\fR.
+.TP
+.BI \-\-update " ID|all"
+Update an app, or every installed app.
+.TP
+.BI \-\-uninstall " ID"
+Uninstall an app.
+.TP
+.BI \-\-delete\-data " ID"
+Delete an uninstalled app's settings and saved data.
+.TP
+.BI \-\-open " ID"
+Open an installed app.
+.TP
+.B \-\-list
+Show installed apps.
+.TP
+.B \-\-check
+Show the latest release of each app.
+.TP
+.B \-\-version
+Show Craft Hub's version.
+.TP
+.BR \-\-uninstall\-self " [" \-\-all "] [" \-\-purge ]
+Uninstall Craft Hub (with \fB\-\-all\fR, also every app it installed; with \fB\-\-purge\fR,
+also their settings and saved data). The packaged Craft Hub is removed with
+\fBapt-get purge crafthub\fR, which asks for your password.
+.SH FILES
+.TP
+.I ~/.local/share/crafthub
+Installed apps and Craft Hub's own data.
+.TP
+.I /etc/apt/sources.list.d/crafthub.sources
+Craft Hub's software source, through which updates arrive. Removing the package keeps it, so
+Craft Hub stays available in Software Manager; purging removes it.
+.TP
+.I /etc/apt/keyrings/crafthub.gpg
+The key Craft Hub's software source is signed with.
+.SH SEE ALSO
+https://github.com/TymonDomanko/CraftHub

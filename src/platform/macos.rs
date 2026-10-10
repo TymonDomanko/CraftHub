@@ -203,6 +203,14 @@ pub fn installed_hub_path() -> PathBuf {
     current_bundle().unwrap_or_else(|| user_applications().join(HUB_BUNDLE))
 }
 
+/// Craft Hub on macOS always installs and updates itself (there's no package of it).
+pub fn packaged() -> bool {
+    false
+}
+pub fn packaged_copy() -> Option<PathBuf> {
+    None
+}
+
 /// On macOS Craft Hub stays wherever you put its `.app`.
 pub fn running_installed_copy() -> bool {
     current_bundle().is_some()

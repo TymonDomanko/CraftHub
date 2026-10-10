@@ -8,6 +8,8 @@
 //! - `startup`, `notice`, `prefers_dark`, `start_source_build`
 //! - `hub_asset_name`, `running_installed_copy`, `is_self_installed`, `install_self`,
 //!   `uninstall_self`, `apply_self_update`, `restart`
+//! - `packaged` (Craft Hub came from a system package, which then owns its updates and
+//!   removal) and `packaged_copy` (the packaged Craft Hub, if this is another copy)
 
 #[cfg(target_os = "linux")]
 mod linux;

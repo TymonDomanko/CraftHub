@@ -347,6 +347,9 @@ impl HubApp {
                 ctx.request_repaint();
             });
         }
+        if platform::packaged() {
+            return; // Update Manager brings new versions of Craft Hub.
+        }
         let (shared, ctx) = (self.shared.clone(), self.ctx.clone());
         thread::spawn(move || {
             let rel = hub::latest().ok().flatten();
@@ -1039,6 +1042,13 @@ impl HubApp {
                         "This removes Craft Hub, its menu entry and everything it keeps for itself \
                          (downloads, cached icons and its list of installed apps).",
                     );
+                    if platform::packaged() {
+                        ui.add_space(4.0);
+                        ui.label(
+                            "Craft Hub was installed through Software Manager, so this also \
+                             removes its software source and asks for your password.",
+                        );
+                    }
                     ui.add_space(8.0);
                     if installed.is_empty() {
                         ui.label(RichText::new("No apps are installed.").color(pal.muted));

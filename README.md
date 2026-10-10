@@ -21,7 +21,24 @@ Crafting Apps use.
 
 ## Install
 
-Everything installs for your user only: no admin password needed.
+### Linux Mint, Ubuntu and Debian: through Software Manager
+
+Download [`crafthub_amd64.deb`](https://github.com/TymonDomanko/CraftHub/releases/latest/download/crafthub_amd64.deb)
+([`crafthub_arm64.deb`](https://github.com/TymonDomanko/CraftHub/releases/latest/download/crafthub_arm64.deb)
+on ARM) and open it. That installs Craft Hub and adds its software source, the same way Chrome and
+VS Code do it. From then on:
+
+- Craft Hub is in **Software Manager** (search for "Craft Hub", or look under Graphics), where you
+  can remove or reinstall it.
+- New versions arrive through **Update Manager** with your other updates.
+- The apps still install for your user only, without a password.
+
+If you already had Craft Hub, open it once after installing the package (and update it if it
+offers to): it switches over to the packaged version and removes the old copy, keeping your apps.
+
+### Everywhere else
+
+These install for your user only: no admin password needed.
 
 **Linux and macOS**, in a terminal:
 
@@ -55,7 +72,7 @@ Craft Hub isn't code-signed. On Windows choose **More info → Run anyway**. On 
 **System Settings → Privacy & Security** and choose **Open Anyway**. The install commands above
 avoid this.
 
-Linux builds need glibc 2.35 or newer (Linux Mint 21+, Ubuntu 22.04+). The Mac version needs
+Linux builds need glibc 2.35 or newer (Linux Mint 21+, Ubuntu 22.04+, Debian 12+). The Mac version needs
 macOS 11 or newer. If you used the earlier Python version of Craft Hub, the new one replaces it
 automatically and keeps the apps you installed.
 
@@ -85,7 +102,10 @@ automatically and keeps the apps you installed.
 - The app's own settings and saved data (preferences, presets, caches, recovery files) are kept
   in case you reinstall. Straight after uninstalling, the card offers **Delete them too**.
 - **Uninstall Craft Hub…** (bottom right) removes Craft Hub and everything it keeps for itself.
-  You can choose to also uninstall the apps it installed and delete their settings. On Windows,
+  You can choose to also uninstall the apps it installed and delete their settings. If you
+  installed the `.deb`, it also removes Craft Hub's software source (it asks for your password).
+  Removing Craft Hub in Software Manager instead keeps the software source, so it stays listed
+  there for a reinstall; the apps it installed stay too. On Windows,
   removing Craft Hub from **Apps & features** also uninstalls the apps it installed, since they
   live in its folder (their settings are kept).
 
@@ -93,7 +113,7 @@ automatically and keeps the apps you installed.
 
 Craft Hub checks for a new version of itself too. When one is out, an **Update Craft Hub**
 button appears in the bottom-right corner next to the version number. One click downloads it,
-verifies it and restarts.
+verifies it and restarts. If you installed the `.deb`, Update Manager brings new versions instead.
 
 ### ArtCraft
 
@@ -121,7 +141,7 @@ crafthub --delete-data ID         Delete an uninstalled app's settings and saved
 crafthub --open ID                Open an installed app
 crafthub --list                   Show installed apps
 crafthub --check                  Show the latest release of each app
-crafthub --install-self           Install Craft Hub for this user
+crafthub --install-self           Install Craft Hub for this user (the .deb doesn't need this)
 crafthub --uninstall-self [--all] [--purge]
                                   Remove Craft Hub; --all also uninstalls every app it
                                   installed, --purge also deletes their settings
@@ -137,7 +157,8 @@ cargo build --release
 ./target/release/crafthub
 ```
 
-On macOS, `packaging/macos/bundle.sh dist` builds the universal `Craft Hub.app`.
+On macOS, `packaging/macos/bundle.sh dist` builds the universal `Craft Hub.app`. On Linux,
+`packaging/linux/build-deb.sh target/release/crafthub amd64 dist` builds the `.deb`.
 
 ## Publishing a release
 
@@ -148,6 +169,21 @@ yet, builds Craft Hub for every platform, writes `SHA256SUMS.txt` and publishes 
 `v2.1.1`, usually within 15 minutes. Everyone's Craft Hub then offers the update. Pushes that don't
 change the version don't make a release. (Pushing a `v2.1.1` tag or publishing a release on GitHub
 works too.)
+
+### The APT repository
+
+The latest release doubles as Craft Hub's APT repository: next to the `.deb` files it has a
+`Packages` index and `Release`/`InRelease` files signed with the key in
+[`packaging/linux/crafthub-archive-keyring.asc`](packaging/linux/crafthub-archive-keyring.asc).
+The `.deb` installs that key and `/etc/apt/sources.list.d/crafthub.sources`, which points at
+`https://github.com/TymonDomanko/CraftHub/releases/latest/download/`, so Update Manager picks up
+each new release. After publishing, the workflow installs the `.deb` on a clean machine and
+checks apt accepts the repository.
+
+The release workflow signs with the private key in the `APT_SIGNING_KEY` repository secret, and
+refuses to publish without it, since a release without the signed index would break `apt update`
+for everyone who installed the `.deb`. If the key ever has to change, ship the new public key in
+a release signed with the old one first.
 
 Every push is also tested by [CI](.github/workflows/ci.yml) on Linux, Windows and macOS (Intel/AMD
 and ARM), including real installs and clean uninstalls of an app.

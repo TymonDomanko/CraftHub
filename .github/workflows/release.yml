@@ -4,7 +4,10 @@
 # release for that version yet, this builds it and publishes `v<version>` automatically.
 # (Pushing a `v*` tag, or publishing a release on GitHub, also works.)
 #
-# Craft Hub's "Update Craft Hub" button downloads its build from the latest release.
+# Craft Hub's "Update Craft Hub" button downloads its build from the latest release. The
+# latest release is also Craft Hub's APT repository (the .deb packages plus a signed
+# Packages/InRelease index), which is how Craft Hub appears in Linux Mint's Software Manager
+# and gets updates through Update Manager. Signing it needs the APT_SIGNING_KEY secret.
 name: Release
 
 on:
@@ -45,8 +48,10 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
             exit 1
           fi
-          assets=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
-          if echo "$assets" | grep -qx "crafthub-macos-universal.zip"; then
+          # Done if the release is published with its builds and APT repository.
+          assets=$(gh release view "$tag" --json isDraft,assets \
+            --jq 'select(.isDraft | not) | .assets[].name' 2>/dev/null || true)
+          if echo "$assets" | grep -qx "crafthub-macos-universal.zip" && echo "$assets" | grep -qx "InRelease"; then
             echo "Release $tag already has its builds; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
@@ -61,8 +66,8 @@ jobs:
       matrix:
         include:
           # Linux builds use Ubuntu 22.04 (glibc 2.35): they run on Linux Mint 21 and newer.
-          - { os: ubuntu-22.04, asset: crafthub-linux-x86_64 }
-          - { os: ubuntu-22.04-arm, asset: crafthub-linux-aarch64 }
+          - { os: ubuntu-22.04, asset: crafthub-linux-x86_64, deb: amd64 }
+          - { os: ubuntu-22.04-arm, asset: crafthub-linux-aarch64, deb: arm64 }
           - { os: windows-latest, asset: crafthub-windows-x86_64.exe }
           - { os: windows-11-arm, asset: crafthub-windows-aarch64.exe }
           - { os: macos-14, asset: crafthub-macos-universal.zip }
@@ -90,12 +95,15 @@ jobs:
               cargo build --release --locked
               cp target/release/crafthub "dist/${{ matrix.asset }}"
               "dist/${{ matrix.asset }}" --version
+              bash packaging/linux/build-deb.sh "dist/${{ matrix.asset }}" "${{ matrix.deb }}" dist
               ;;
           esac
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/crafthub_*.deb
           if-no-files-found: error
 
   publish:
@@ -113,15 +121,73 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum crafthub-* > SHA256SUMS.txt
+          sha256sum crafthub-* crafthub_*.deb > SHA256SUMS.txt
           cat SHA256SUMS.txt
+      - name: APT repository (Software Manager)
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          # Installed .deb packages fetch updates from the latest release, so every release
+          # needs the signed repository; without the key, stop rather than publish one without.
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo "::error title=APT_SIGNING_KEY secret is missing::Add the repository secret APT_SIGNING_KEY (Settings > Secrets and variables > Actions), then re-run this workflow."
+            exit 1
+          fi
+          sudo apt-get update -q && sudo apt-get install -y -q dpkg-dev apt-utils
+          export GNUPGHOME="$(mktemp -d)"
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          bash packaging/linux/build-apt-repo.sh dist
+          rm -rf "$GNUPGHOME"
+          # The signature has to match the key the package installs, or apt rejects it.
+          gpg --dearmor < packaging/linux/crafthub-archive-keyring.asc > "$RUNNER_TEMP/crafthub.gpg"
+          if ! gpgv --keyring "$RUNNER_TEMP/crafthub.gpg" dist/InRelease \
+             || ! gpgv --keyring "$RUNNER_TEMP/crafthub.gpg" dist/Release.gpg dist/Release; then
+            echo "::error title=Wrong APT signing key::APT_SIGNING_KEY doesn't match packaging/linux/crafthub-archive-keyring.asc."
+            exit 1
+          fi
       - name: Publish release
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --draft=false
           else
-            gh release create "$TAG" dist/* \
+            # Upload to a draft first, so "latest" (which the update button and the APT
+            # repository follow) never points at a half-uploaded release.
+            gh release create "$TAG" dist/* --draft \
               --target "$GITHUB_SHA" \
               --title "Craft Hub ${TAG#v}" \
               --notes-file .github/release-notes.md
+            gh release edit "$TAG" --draft=false --latest
           fi
+
+  # Install the published .deb on a clean machine and update from the real APT repository,
+  # the way Software Manager and Update Manager will.
+  check-apt:
+    needs: [version, publish]
+    name: Check the APT repository
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - name: Install the package and update from its software source
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/crafthub.deb" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/crafthub_amd64.deb"
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends "$RUNNER_TEMP/crafthub.deb"
+          # Only Craft Hub's source, to keep this quick and independent of the others.
+          parts="$RUNNER_TEMP/parts"
+          mkdir "$parts"
+          cp /etc/apt/sources.list.d/crafthub.sources "$parts/"
+          only=(-o Dir::Etc::sourcelist=/dev/null -o Dir::Etc::sourceparts="$parts")
+          { sudo apt-get "${only[@]}" -o APT::Get::List-Cleanup=0 update 2>&1 || true; } | tee update.log
+          if grep -qE '^(W|E):' update.log; then
+            echo "::error title=APT repository::apt update failed: $(grep -E '^(W|E):' update.log | head -3 | tr '\n' ' ')"
+            exit 1
+          fi
+          apt-cache "${only[@]}" policy crafthub | tee policy.log
+          grep -qF "Candidate: ${TAG#v}" policy.log \
+            || { echo "::error title=APT repository::apt doesn't offer crafthub ${TAG#v}"; exit 1; }
+          cd "$RUNNER_TEMP" && apt-get "${only[@]}" download crafthub
+          ls -la crafthub_*.deb
