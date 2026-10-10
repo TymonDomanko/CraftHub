@@ -49,7 +49,10 @@ case "$RUNNER_OS" in
   Linux) test ! -f "$HOME/.local/share/applications/ai.storyteller.$APP.desktop" || die "menu entry left behind" ;;
   Windows)
     test ! -f "$(native "$APPDATA")/Microsoft/Windows/Start Menu/Programs/$NAME.lnk" || die "shortcut left behind"
-    test ! -f "$(native "$USERPROFILE")/Desktop/$NAME.lnk" || die "Desktop shortcut left behind"
+    leftovers=$(find "$(native "$USERPROFILE")/Desktop" "$(native "$PUBLIC")/Desktop" \
+      "$(native "$APPDATA")/Microsoft/Windows/Start Menu" "$(native "$PROGRAMDATA")/Microsoft/Windows/Start Menu" \
+      -iname "*$NAME*" 2>/dev/null || true)
+    [ -z "$leftovers" ] || die "shortcuts left behind: $leftovers"
     ;;
 esac
 
@@ -94,5 +97,11 @@ case "$RUNNER_OS" in
 esac
 [ ! -e "$hubdir" ] || die "Craft Hub's folder is still there: $hubdir"
 [ ! -e "$path" ] || die "$APP is still installed"
+if [ "$RUNNER_OS" = Windows ]; then
+  leftovers=$(find "$(native "$USERPROFILE")/Desktop" "$(native "$PUBLIC")/Desktop" \
+    "$(native "$APPDATA")/Microsoft/Windows/Start Menu" "$(native "$PROGRAMDATA")/Microsoft/Windows/Start Menu" \
+    \( -iname "*$NAME*" -o -iname "*Craft Hub*" \) 2>/dev/null || true)
+  [ -z "$leftovers" ] || die "shortcuts left behind: $leftovers"
+fi
 
 say "all good"
