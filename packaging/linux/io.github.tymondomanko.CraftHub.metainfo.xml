@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.tymondomanko.CraftHub</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Craft Hub</name>
+  <summary>Install, update and uninstall the Crafting Apps</summary>
+  <description>
+    <p>
+      Craft Hub is a Creative-Cloud-style manager for the ArtCraft Crafting Apps: PhotoCraft,
+      VectorCraft, DesignCraft, LightCraft, FilmCraft, EffectCraft, PDFCraft and ArtCraft.
+    </p>
+    <ul>
+      <li>One click to install, update, uninstall or open each app</li>
+      <li>Downloads are verified against each release's checksums</li>
+      <li>Apps with updates are sorted to the top, with an Update all button</li>
+      <li>Clean uninstall, optionally including each app's settings</li>
+    </ul>
+    <p>Craft Hub is an independent project and isn't affiliated with the ArtCraft team or Adobe Inc.</p>
+  </description>
+  <launchable type="desktop-id">crafthub.desktop</launchable>
+  <icon type="stock">crafthub</icon>
+  <url type="homepage">https://github.com/TymonDomanko/CraftHub</url>
+  <url type="bugtracker">https://github.com/TymonDomanko/CraftHub/issues</url>
+  <developer id="io.github.tymondomanko">
+    <name>Tymon Domanko</name>
+  </developer>
+  <categories>
+    <category>Graphics</category>
+    <category>PackageManager</category>
+  </categories>
+  <provides>
+    <binary>crafthub</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

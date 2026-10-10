@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Craft Hub
+GenericName=App Manager
+Comment=Install, update and uninstall the Crafting Apps
+Exec=crafthub
+Icon=crafthub
+Terminal=false
+StartupWMClass=crafthub
+Categories=Graphics;
+Keywords=artcraft;photocraft;vectorcraft;filmcraft;lightcraft;pdfcraft;effectcraft;designcraft;adobe;

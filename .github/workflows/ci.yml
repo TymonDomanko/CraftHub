@@ -22,7 +22,7 @@ jobs:
       - run: bash .github/scripts/install-rust.sh
       - run: cargo fmt --check
       - run: |
-          for f in install.sh scripts/*.sh packaging/macos/*.sh .github/scripts/*.sh; do bash -n "$f"; done
+          for f in install.sh scripts/*.sh packaging/*/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 
   test:
     name: ${{ matrix.name }}
@@ -84,6 +84,26 @@ jobs:
             commit -q -m "Craft Hub on ${{ matrix.name }} (${GITHUB_SHA::7})"
           git push -q -f "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY" \
             "HEAD:refs/heads/ci-screenshots/${{ matrix.os }}"
+
+  # The .deb that puts Craft Hub in Software Manager, and its APT repository.
+  # 22.04 is the oldest supported base (Linux Mint 21), 24.04 is Linux Mint 22's.
+  deb:
+    name: Linux package (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Ubuntu 22.04 x86_64, os: ubuntu-22.04 }
+          - { name: Ubuntu 24.04 ARM64, os: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash .github/scripts/install-rust.sh
+      - run: sudo apt-get update -q && sudo apt-get install -y -q desktop-file-utils appstream dpkg-dev apt-utils
+      - name: Build
+        run: bash .github/scripts/run.sh build cargo build --release --locked
+      - name: Install, upgrade and remove the package
+        run: bash .github/scripts/run.sh deb bash .github/scripts/deb-test.sh target/release/crafthub
 
   macos-bundle:
     name: macOS app bundle

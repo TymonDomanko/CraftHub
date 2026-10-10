@@ -276,6 +276,12 @@ fn main() -> ExitCode {
 }
 
 fn run_gui() -> ExitCode {
+    // Craft Hub is installed as a package (from Software Manager), but this is an older
+    // per-user copy or a downloaded file: open the packaged one instead.
+    if let Some(packaged) = platform::packaged_copy() {
+        let err = platform::restart(&packaged);
+        eprintln!("crafthub: couldn't start {}: {err}", packaged.display());
+    }
     // First run (or running a downloaded copy): install Craft Hub for this user.
     if (!platform::running_installed_copy() || !platform::is_self_installed())
         && let Err(e) = hub::install_self()

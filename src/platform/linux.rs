@@ -1,5 +1,6 @@
 //! Linux: AppImages in `~/.local/share/crafthub/apps`, freedesktop menu entries, and
-//! Craft Hub installed as `~/.local/bin/crafthub`.
+//! Craft Hub installed as `~/.local/bin/crafthub`, or as `/usr/bin/crafthub` from its
+//! .deb package (Software Manager), in which case apt updates and removes it.
 
 use std::fs;
 use std::os::unix::process::CommandExt;
@@ -36,6 +37,8 @@ fn bin_dir() -> PathBuf {
 pub fn installed_hub_path() -> PathBuf {
     bin_dir().join("crafthub")
 }
+/// Where Craft Hub's .deb package puts it.
+const PACKAGED_HUB: &str = "/usr/bin/crafthub";
 fn hub_desktop_file() -> PathBuf {
     desktop_dir().join("crafthub.desktop")
 }
@@ -233,6 +236,15 @@ fn migrate_entries() {
 pub fn startup() {
     cleanup_orphans();
     migrate_entries();
+    replace_user_copy();
+}
+
+/// Installed through Software Manager after a per-user install: drop the per-user copy,
+/// whose menu entry would otherwise hide the packaged one.
+fn replace_user_copy() {
+    if packaged() && (installed_hub_path().exists() || hub_desktop_file().exists()) {
+        remove_user_copy();
+    }
 }
 
 pub fn install_package(
@@ -469,21 +481,53 @@ fn remove_if_symlink(p: &Path) {
     }
 }
 
-pub fn running_installed_copy() -> bool {
+fn is_current_exe(path: &Path) -> bool {
     let exe = std::env::current_exe()
         .ok()
         .and_then(|e| fs::canonicalize(e).ok());
-    exe.is_some() && exe == fs::canonicalize(installed_hub_path()).ok()
+    exe.is_some() && exe == fs::canonicalize(path).ok()
+}
+
+/// Is this Craft Hub the one from its .deb package (installed through Software Manager)?
+/// Then the package manager owns updates and removal.
+pub fn packaged() -> bool {
+    is_current_exe(Path::new(PACKAGED_HUB))
+}
+
+/// When the Craft Hub package is installed but this is a different copy (an earlier
+/// per-user install or a downloaded file), the packaged one to start instead.
+pub fn packaged_copy() -> Option<PathBuf> {
+    let p = Path::new(PACKAGED_HUB);
+    (p.is_file() && !packaged()).then(|| p.to_path_buf())
+}
+
+pub fn running_installed_copy() -> bool {
+    packaged() || is_current_exe(&installed_hub_path())
 }
 
 pub fn is_self_installed() -> bool {
-    installed_hub_path().is_file() && hub_desktop_file().is_file()
+    packaged() || (installed_hub_path().is_file() && hub_desktop_file().is_file())
+}
+
+/// Remove the per-user copy: `~/.local/bin/crafthub`, its menu entry and icons.
+fn remove_user_copy() {
+    let _ = fs::remove_file(hub_desktop_file());
+    let _ = fs::remove_file(hicolor_dir().join("scalable/apps/crafthub.svg"));
+    let _ = fs::remove_file(icon_dir().join("crafthub.png"));
+    let _ = fs::remove_file(installed_hub_path());
+    refresh_menus();
 }
 
 /// Copy this binary to `~/.local/bin/crafthub` and add Craft Hub to the menu.
-/// Also replaces the earlier Python version if it's there.
+/// Also replaces the earlier Python version if it's there. When this is the packaged
+/// Craft Hub, it only clears out any per-user copy, which would otherwise add a second
+/// menu entry and update itself separately.
 pub fn install_self() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if packaged() {
+        replace_user_copy();
+        return Ok(exe);
+    }
     let target = installed_hub_path();
     fs::create_dir_all(bin_dir()).map_err(|e| e.to_string())?;
     remove_if_symlink(&target); // the Python version symlinked crafthub.py here
@@ -504,7 +548,7 @@ pub fn install_self() -> Result<PathBuf, String> {
     let entry = format!(
         "[Desktop Entry]\nType=Application\nName=Craft Hub\n\
          Comment=Install, update and uninstall the Crafting Apps\nExec={}\nIcon=crafthub\n\
-         Terminal=false\nStartupWMClass=crafthub\nCategories=Graphics;System;PackageManager;\n\
+         Terminal=false\nStartupWMClass=crafthub\nCategories=Graphics;\n\
          Keywords=artcraft;photocraft;vectorcraft;filmcraft;lightcraft;pdfcraft;effectcraft;designcraft;adobe;\n",
         exec_quote(&target.to_string_lossy())
     );
@@ -518,18 +562,51 @@ pub fn install_self() -> Result<PathBuf, String> {
     Ok(target)
 }
 
-/// Remove Craft Hub's own binary and menu entry.
+/// Remove Craft Hub's own binary and menu entry. The packaged Craft Hub is removed with
+/// its package, software source included, after asking for the password.
 pub fn uninstall_self() -> Result<(), String> {
-    let _ = fs::remove_file(hub_desktop_file());
-    let _ = fs::remove_file(hicolor_dir().join("scalable/apps/crafthub.svg"));
-    let _ = fs::remove_file(icon_dir().join("crafthub.png"));
-    let _ = fs::remove_file(installed_hub_path());
-    refresh_menus();
-    Ok(())
+    if !packaged() {
+        remove_user_copy();
+        return Ok(());
+    }
+    let out = Command::new("pkexec")
+        .args(["/usr/bin/apt-get", "purge", "-y", "crafthub"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|_| {
+            "Couldn't uninstall Craft Hub here. Remove it in Software Manager instead.".to_string()
+        })?;
+    match out.status.code() {
+        Some(0) => {
+            remove_user_copy();
+            Ok(())
+        }
+        // pkexec: the password prompt was dismissed or refused.
+        Some(126 | 127) => {
+            Err("Craft Hub wasn't uninstalled, because the password wasn't entered.".into())
+        }
+        _ => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let reason = err
+                .lines()
+                .rev()
+                .find(|l| l.starts_with("E: "))
+                .map(|l| format!(" ({})", l.trim_start_matches("E: ").trim()))
+                .unwrap_or_default();
+            Err(format!(
+                "Couldn't uninstall Craft Hub{reason}. {PACKAGE_REMOVE_HINT}"
+            ))
+        }
+    }
 }
+
+const PACKAGE_REMOVE_HINT: &str = "You can also remove it in Software Manager.";
 
 /// Put a downloaded new version in place. Returns what to restart into.
 pub fn apply_self_update(downloaded: &Path) -> Result<PathBuf, String> {
+    if packaged() {
+        return Err("This Craft Hub gets its updates through Update Manager.".into());
+    }
     let target = installed_hub_path();
     fs::create_dir_all(bin_dir()).map_err(|e| e.to_string())?;
     remove_if_symlink(&target);

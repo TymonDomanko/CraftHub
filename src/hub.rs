@@ -91,6 +91,11 @@ pub fn install_self() -> Result<PathBuf, String> {
 /// Remove Craft Hub and everything it keeps for itself. With `all`, also every app it
 /// installed; with `purge`, also those apps' settings and saved data.
 pub fn uninstall_self(all: bool, purge: bool) -> Result<(), String> {
+    // Removing the package asks for the password first, so cancelling changes nothing.
+    let packaged = platform::packaged();
+    if packaged {
+        platform::uninstall_self()?;
+    }
     if all || purge {
         for app in APPS {
             if crate::state::load().contains_key(app.id) {
@@ -101,7 +106,9 @@ pub fn uninstall_self(all: bool, purge: bool) -> Result<(), String> {
             }
         }
     }
-    platform::uninstall_self()?;
+    if !packaged {
+        platform::uninstall_self()?;
+    }
     let dir = paths::hub_dir();
     if all || purge || crate::state::load().is_empty() {
         let _ = std::fs::remove_dir_all(&dir);

@@ -1,0 +1,9 @@
+# Craft Hub's software source, added by the crafthub package so Craft Hub shows up in
+# Software Manager and its updates arrive through Update Manager. It stays (so Craft Hub
+# can be reinstalled) when the package is removed, and goes when it's purged.
+# (X-Repolib-Name is the name Software Sources shows for it.)
+X-Repolib-Name: Craft Hub
+Types: deb
+URIs: https://github.com/TymonDomanko/CraftHub/releases/latest/download/
+Suites: ./
+Signed-By: /etc/apt/keyrings/crafthub.gpg

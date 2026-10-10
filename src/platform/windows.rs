@@ -442,6 +442,14 @@ fn old_copy(target: &Path) -> PathBuf {
     target.with_file_name("crafthub.exe.old")
 }
 
+/// Craft Hub on Windows always installs and updates itself (there's no package of it).
+pub fn packaged() -> bool {
+    false
+}
+pub fn packaged_copy() -> Option<PathBuf> {
+    None
+}
+
 pub fn running_installed_copy() -> bool {
     let exe = std::env::current_exe()
         .ok()
