@@ -145,6 +145,28 @@ pub fn launch(_app: &App, info: &Installed) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Where an app may keep settings, caches and data in `~/Library`, under any of its names
+/// (and its bundle id for the files macOS itself keeps per app).
+pub fn data_locations(app: &App, names: &[String]) -> Vec<PathBuf> {
+    let lib = paths::home().join("Library");
+    let mut v: Vec<PathBuf> = ["Application Support", "Caches", "Logs"]
+        .iter()
+        .flat_map(|b| {
+            let base = lib.join(b);
+            names.iter().map(move |n| base.join(n))
+        })
+        .collect();
+    let id = app.desktop_id;
+    v.extend([
+        lib.join("Preferences").join(format!("{id}.plist")),
+        lib.join("Saved Application State")
+            .join(format!("{id}.savedState")),
+        lib.join("HTTPStorages").join(id),
+        lib.join("WebKit").join(id),
+    ]);
+    v
+}
+
 /// Apps use their own icons in Finder and the Dock, so nothing to update.
 pub fn icon_updated(_app: &App, _info: &Installed) {}
 

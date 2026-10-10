@@ -88,18 +88,37 @@ pub fn install_self() -> Result<PathBuf, String> {
     platform::install_self()
 }
 
-/// Remove Craft Hub; with `all`, also every app it installed.
-pub fn uninstall_self(all: bool) -> Result<(), String> {
-    if all {
+/// Remove Craft Hub and everything it keeps for itself. With `all`, also every app it
+/// installed; with `purge`, also those apps' settings and saved data.
+pub fn uninstall_self(all: bool, purge: bool) -> Result<(), String> {
+    if all || purge {
         for app in APPS {
             if crate::state::load().contains_key(app.id) {
                 install::uninstall(app)?;
+                if purge {
+                    install::delete_app_data(app)?;
+                }
             }
         }
     }
     platform::uninstall_self()?;
-    if all {
-        let _ = std::fs::remove_dir_all(paths::hub_dir());
+    let dir = paths::hub_dir();
+    if all || purge || crate::state::load().is_empty() {
+        let _ = std::fs::remove_dir_all(&dir);
+    } else {
+        // Keep the installed apps and the record of them; remove everything else.
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name == "apps" || name == "state.json" {
+                continue;
+            }
+            let p = e.path();
+            let _ = if p.is_dir() {
+                std::fs::remove_dir_all(&p)
+            } else {
+                std::fs::remove_file(&p)
+            };
+        }
     }
     Ok(())
 }

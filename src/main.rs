@@ -32,7 +32,10 @@ Usage:
   crafthub --list                   Show installed apps
   crafthub --check                  Show the latest release of each app
   crafthub --install-self           Install Craft Hub for this user
-  crafthub --uninstall-self [--all] Remove Craft Hub (--all also removes every app it installed)
+  crafthub --delete-data ID         Delete an uninstalled app's settings and saved data
+  crafthub --uninstall-self [--all] [--purge]
+                                    Remove Craft Hub; --all also uninstalls every app it
+                                    installed, --purge also deletes their settings
   crafthub --version
 ";
 
@@ -185,9 +188,36 @@ fn main() -> ExitCode {
             }
             Err(e) => fail(e),
         },
+        ["--delete-data", id] => match app_arg(id) {
+            Ok(app) => {
+                let found = install::app_data(app);
+                if found.is_empty() {
+                    return report(Ok(format!(
+                        "{} has no settings or saved data here",
+                        app.name
+                    )));
+                }
+                let size = install::human_size(install::size_of(&found));
+                report(install::delete_app_data(app).map(|_| {
+                    let list: Vec<String> =
+                        found.iter().map(|p| format!("  {}", p.display())).collect();
+                    format!(
+                        "Deleted {}'s settings and data ({size}):\n{}",
+                        app.name,
+                        list.join("\n")
+                    )
+                }))
+            }
+            Err(code) => code,
+        },
         ["--uninstall-self", rest @ ..] => {
-            let all = rest.contains(&"--all");
-            match hub::uninstall_self(all) {
+            let purge = rest.contains(&"--purge");
+            let all = purge || rest.contains(&"--all");
+            match hub::uninstall_self(all, purge) {
+                Ok(()) if purge => {
+                    println!("Removed Craft Hub, every app it installed, and their settings.");
+                    ExitCode::SUCCESS
+                }
                 Ok(()) if all => {
                     println!("Removed Craft Hub and every app it installed.");
                     ExitCode::SUCCESS

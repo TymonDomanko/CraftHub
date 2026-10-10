@@ -50,6 +50,8 @@ struct CardState {
     /// Message shown in the card, and whether it's an error.
     note: Option<(String, bool)>,
     build: Option<Build>,
+    /// After uninstalling: the app's own settings/data left on disk (their size).
+    leftover: Option<String>,
 }
 
 struct Shared {
@@ -62,6 +64,15 @@ struct Shared {
     state_dirty: bool,
     /// Apps whose icon was just downloaded and needs reloading.
     new_icons: Vec<&'static str>,
+    /// Result of uninstalling Craft Hub itself.
+    hub_uninstalled: Option<Result<String, String>>,
+}
+
+/// The "Uninstall Craft Hub" dialog.
+struct UninstallDialog {
+    all: bool,
+    purge: bool,
+    working: bool,
 }
 
 type SharedRef = Arc<Mutex<Shared>>;
@@ -82,6 +93,7 @@ struct CardView {
     /// A newer release is out (not counting "rebuild" for source builds).
     has_update: bool,
     source: bool,
+    leftover: Option<String>,
 }
 
 enum Action {
@@ -93,6 +105,8 @@ enum Action {
     Refresh,
     UpdateAll,
     UpdateHub,
+    DeleteData(&'static str),
+    UninstallHub,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -170,6 +184,7 @@ pub struct HubApp {
     content_heights: HashMap<&'static str, f32>,
     /// A platform notice shown under the header (e.g. FUSE missing on Linux).
     notice: Option<String>,
+    uninstall_dialog: Option<UninstallDialog>,
 }
 
 pub fn decode_png(bytes: &[u8]) -> (Vec<u8>, u32, u32) {
@@ -255,6 +270,7 @@ impl HubApp {
                         busy: None,
                         note: None,
                         build: None,
+                        leftover: None,
                     },
                 )
             })
@@ -268,6 +284,7 @@ impl HubApp {
             restart_to: None,
             state_dirty: true,
             new_icons: Vec::new(),
+            hub_uninstalled: None,
         }));
         let mut app = Self {
             shared,
@@ -279,6 +296,7 @@ impl HubApp {
             order: APPS.iter().map(|a| a.id).collect(),
             content_heights: HashMap::new(),
             notice: platform::notice(),
+            uninstall_dialog: None,
         };
         app.reload_state();
         app.check_all();
@@ -400,6 +418,10 @@ impl HubApp {
             can_update,
             has_update,
             source,
+            leftover: c
+                .leftover
+                .clone()
+                .filter(|_| !self.installed.contains_key(app.id)),
         }
     }
 
@@ -499,6 +521,7 @@ impl HubApp {
             bytes: None,
         });
         c.note = None;
+        c.leftover = None;
     }
 
     fn finish(
@@ -601,7 +624,37 @@ impl HubApp {
                 let (shared, ctx) = (self.shared.clone(), self.ctx.clone());
                 thread::spawn(move || {
                     let result = install::uninstall(app).map(|_| "Uninstalled.".to_string());
+                    let ok = result.is_ok();
                     Self::finish(&shared, &ctx, id, result);
+                    if ok {
+                        // The app's own settings and data stay unless you delete them too.
+                        let data = install::app_data(app);
+                        if !data.is_empty() {
+                            let size = install::human_size(install::size_of(&data));
+                            if let Some(c) = lock(&shared).cards.get_mut(id) {
+                                c.leftover = Some(size);
+                            }
+                            ctx.request_repaint();
+                        }
+                    }
+                });
+            }
+            Action::DeleteData(id) => {
+                let app = apps::by_id(id).expect("known app");
+                self.set_busy(id, "Deleting settings and saved data…".into());
+                let (shared, ctx) = (self.shared.clone(), self.ctx.clone());
+                thread::spawn(move || {
+                    let result = install::delete_app_data(app)
+                        .map(|_| format!("Deleted {}'s settings and saved data.", app.name));
+                    Self::finish(&shared, &ctx, id, result);
+                });
+            }
+            Action::UninstallHub => {
+                let any = APPS.iter().any(|a| self.installed.contains_key(a.id));
+                self.uninstall_dialog = Some(UninstallDialog {
+                    all: any,
+                    purge: false,
+                    working: false,
                 });
             }
             Action::Open(id) => {
@@ -759,6 +812,16 @@ impl HubApp {
                 if ver.clicked() {
                     actions.push(Action::Url(hub::releases_url()));
                 }
+                if ui
+                    .link(
+                        RichText::new("Uninstall Craft Hub…")
+                            .size(12.0)
+                            .color(pal.muted),
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::UninstallHub);
+                }
                 if let Some(r) = s.hub_release.as_ref().filter(|r| r.is_newer())
                     && button(
                         ui,
@@ -833,6 +896,26 @@ impl HubApp {
                     pal.muted
                 }));
             }
+            if let Some(size) = v.leftover.as_ref().filter(|_| v.busy.is_none()) {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "Its settings and saved data are still on this computer ({size})."
+                        ))
+                        .size(12.5)
+                        .color(pal.muted),
+                    );
+                    if ui
+                        .add(egui::Button::new(RichText::new("Delete them too").size(12.5)).small())
+                        .on_hover_text(
+                            "Removes the app's preferences, presets, caches and recovery files",
+                        )
+                        .clicked()
+                    {
+                        actions.push(Action::DeleteData(app.id));
+                    }
+                });
+            }
             match &v.busy {
                 Some(b) => {
                     let label = match b.bytes {
@@ -903,6 +986,114 @@ impl HubApp {
                 });
             });
         });
+    }
+}
+
+impl HubApp {
+    /// "Uninstall Craft Hub?" with options to also remove the apps and their settings.
+    fn uninstall_hub_dialog(&mut self, ctx: &egui::Context, pal: &Palette) {
+        if self.uninstall_dialog.is_none() {
+            return;
+        }
+        let result = lock(&self.shared).hub_uninstalled.clone();
+        let installed: Vec<&str> = APPS
+            .iter()
+            .filter(|a| self.installed.contains_key(a.id))
+            .map(|a| a.name)
+            .collect();
+        let mut close = false;
+        let mut start = None;
+        let Some(d) = self.uninstall_dialog.as_mut() else {
+            return;
+        };
+        let modal = egui::Modal::new(egui::Id::new("uninstall-craft-hub")).show(ctx, |ui| {
+            ui.set_width(440.0);
+            match &result {
+                Some(Ok(msg)) => {
+                    ui.heading("Craft Hub has been uninstalled");
+                    ui.label(msg);
+                    ui.add_space(8.0);
+                    if button(ui, pal, "Close", true, Kind::Primary) {
+                        std::process::exit(0);
+                    }
+                }
+                Some(Err(e)) => {
+                    ui.heading("Couldn't finish uninstalling");
+                    ui.label(RichText::new(e).color(pal.error));
+                    ui.add_space(8.0);
+                    if button(ui, pal, "Close", true, Kind::Normal) {
+                        close = true;
+                    }
+                }
+                None if d.working => {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new());
+                        ui.label("Uninstalling…");
+                    });
+                }
+                None => {
+                    ui.heading("Uninstall Craft Hub?");
+                    ui.add_space(4.0);
+                    ui.label(
+                        "This removes Craft Hub, its menu entry and everything it keeps for itself \
+                         (downloads, cached icons and its list of installed apps).",
+                    );
+                    ui.add_space(8.0);
+                    if installed.is_empty() {
+                        ui.label(RichText::new("No apps are installed.").color(pal.muted));
+                    } else {
+                        ui.checkbox(
+                            &mut d.all,
+                            format!(
+                                "Also uninstall the apps it installed ({})",
+                                installed.join(", ")
+                            ),
+                        );
+                        ui.add_enabled_ui(d.all, |ui| {
+                            ui.checkbox(
+                                &mut d.purge,
+                                "Also delete those apps' settings and saved data",
+                            );
+                        });
+                        if !d.all {
+                            d.purge = false;
+                        }
+                    }
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if button(ui, pal, "Uninstall", true, Kind::Danger) {
+                            start = Some((d.all, d.purge));
+                        }
+                        if button(ui, pal, "Cancel", true, Kind::Normal) {
+                            close = true;
+                        }
+                    });
+                }
+            }
+        });
+        if modal.should_close() && !d.working && result.is_none() {
+            close = true;
+        }
+        if let Some((all, purge)) = start {
+            d.working = true;
+            let (shared, ctx) = (self.shared.clone(), self.ctx.clone());
+            thread::spawn(move || {
+                let result = hub::uninstall_self(all, purge).map(|_| {
+                    match (all, purge) {
+                        (_, true) => "Craft Hub, the apps it installed and their settings were removed.",
+                        (true, false) => "Craft Hub and the apps it installed were removed. The apps' own settings were kept.",
+                        _ => "Craft Hub was removed. The apps it installed are still on this computer.",
+                    }
+                    .to_string()
+                });
+                lock(&shared).hub_uninstalled = Some(result);
+                ctx.request_repaint();
+            });
+        }
+        if close {
+            self.uninstall_dialog = None;
+            lock(&self.shared).hub_uninstalled = None;
+        }
     }
 }
 
@@ -998,6 +1189,7 @@ impl eframe::App for HubApp {
                 restart_to: None,
                 state_dirty: false,
                 new_icons: Vec::new(),
+                hub_uninstalled: None,
             };
             drop(s);
             egui::Panel::bottom("footer")
@@ -1049,6 +1241,8 @@ impl eframe::App for HubApp {
                         }
                     });
             });
+
+        self.uninstall_hub_dialog(ui.ctx(), &pal);
 
         for a in actions {
             self.run(a, &views);

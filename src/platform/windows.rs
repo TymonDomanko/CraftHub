@@ -313,6 +313,26 @@ fn install_setup(app: &App, file: &Path) -> Result<(String, Option<String>), Str
     Ok((exe.to_string_lossy().to_string(), entry.uninstall))
 }
 
+/// Shortcuts an installer may have created (Desktop and Start Menu) named after the app.
+fn remove_installer_shortcuts(app: &App) {
+    let lnk = format!("{}.lnk", app.name);
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+        dirs.push(profile.join("Desktop"));
+        dirs.push(profile.join("OneDrive").join("Desktop"));
+    }
+    if let Some(public) = std::env::var_os("PUBLIC").map(PathBuf::from) {
+        dirs.push(public.join("Desktop"));
+    }
+    dirs.push(start_menu_dir());
+    dirs.push(start_menu_dir().join(app.name));
+    for d in dirs {
+        let _ = fs::remove_file(d.join(&lnk));
+    }
+    // An app's own Start Menu folder, if the installer made one and it's now empty.
+    let _ = fs::remove_dir(start_menu_dir().join(app.name));
+}
+
 /// Split an uninstall command line into program and arguments.
 fn split_command(cmd: &str) -> (String, Vec<String>) {
     let cmd = cmd.trim();
@@ -341,12 +361,21 @@ pub fn remove_package(app: &App, info: Option<&Installed>) -> Result<(), String>
         let (prog, args) = split_command(&cmd);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         run_installer(Path::new(&prog), &args)?;
-        // NSIS uninstallers copy themselves and return early; wait for the files to go.
+        // NSIS uninstallers copy themselves and return early; wait for the program and
+        // its folder to go.
+        let exe = Path::new(&i.path);
+        let install_dir = exe.parent().map(Path::to_path_buf);
         for _ in 0..60 {
-            if !Path::new(&i.path).exists() {
+            let gone = !exe.exists() && install_dir.as_ref().is_none_or(|d| !d.exists());
+            if gone {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        // Remove anything the installer left behind: its shortcuts and an empty folder.
+        remove_installer_shortcuts(app);
+        if let Some(d) = install_dir.filter(|d| d.exists()) {
+            let _ = fs::remove_dir_all(d);
         }
         return Ok(());
     }
@@ -370,6 +399,20 @@ pub fn launch(_app: &App, info: &Installed) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// Where an app may keep settings, caches and data: `%APPDATA%` and `%LOCALAPPDATA%`,
+/// under any of its names.
+pub fn data_locations(_app: &App, names: &[String]) -> Vec<PathBuf> {
+    let roaming = std::env::var_os("APPDATA").map(PathBuf::from);
+    let bases: Vec<PathBuf> = roaming
+        .into_iter()
+        .chain([paths::local_app_data()])
+        .collect();
+    bases
+        .iter()
+        .flat_map(|b| names.iter().map(move |n| b.join(n)))
+        .collect()
 }
 
 /// Shortcuts use the app's own icon, so nothing to update.
@@ -444,8 +487,13 @@ pub fn install_self() -> Result<PathBuf, String> {
         ("Publisher", "Tymon Domanko".to_string()),
         ("DisplayIcon", format!("\"{t}\",0")),
         ("InstallLocation", dir.to_string_lossy().to_string()),
-        ("UninstallString", format!("\"{t}\" --uninstall-self")),
-        ("QuietUninstallString", format!("\"{t}\" --uninstall-self")),
+        // The apps live in Craft Hub's folder, so removing Craft Hub removes them too
+        // (their own settings in %APPDATA% are kept).
+        ("UninstallString", format!("\"{t}\" --uninstall-self --all")),
+        (
+            "QuietUninstallString",
+            format!("\"{t}\" --uninstall-self --all"),
+        ),
         (
             "URLInfoAbout",
             "https://github.com/TymonDomanko/CraftHub".to_string(),
@@ -470,10 +518,11 @@ pub fn uninstall_self() -> Result<(), String> {
     let target = installed_hub_path();
     let dir = target.parent().unwrap_or(&target).to_path_buf();
     if running_installed_copy() {
-        // A running program can't delete itself; remove the folder once we've exited.
+        // A running program can't delete itself. Keep trying (for up to two minutes) to
+        // remove the folder until Craft Hub has exited.
+        let d = dir.to_string_lossy();
         let cmd = format!(
-            "ping -n 3 127.0.0.1 >NUL & rmdir /S /Q \"{}\"",
-            dir.to_string_lossy()
+            "for /L %i in (1,1,60) do @(if exist \"{d}\" (ping -n 3 127.0.0.1 >NUL & rmdir /S /Q \"{d}\" 2>NUL))"
         );
         let _ = hidden("cmd")
             .args(["/C", &cmd])
