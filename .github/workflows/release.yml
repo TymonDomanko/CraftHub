@@ -1,10 +1,10 @@
-# Builds Craft Hub and publishes it as a GitHub release.
+# Builds Craft Hub for every platform and publishes a GitHub release.
 #
 # Releasing a new version: bump `version` in Cargo.toml and push to main. If there's no
 # release for that version yet, this builds it and publishes `v<version>` automatically.
 # (Pushing a `v*` tag, or publishing a release on GitHub, also works.)
 #
-# Craft Hub's "Update Craft Hub" button downloads the binary from the latest release.
+# Craft Hub's "Update Craft Hub" button downloads its build from the latest release.
 name: Release
 
 on:
@@ -23,17 +23,21 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  release:
-    # Built on Ubuntu 22.04 (glibc 2.35) so it runs on Linux Mint 21 and newer.
+  version:
     runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      skip: ${{ steps.v.outputs.skip }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Work out the version
-        id: version
+      - id: v
+        name: Work out the version
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           tag="v$version"
@@ -41,38 +45,77 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
             exit 1
           fi
-          if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null \
-             | grep -qx "crafthub-linux-x86_64"; then
-            echo "Release $tag already has its binary; nothing to do."
+          assets=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if echo "$assets" | grep -qx "crafthub-macos-universal.zip"; then
+            echo "Release $tag already has its builds; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Install Rust
-        if: steps.version.outputs.skip != 'true'
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
+  build:
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux builds use Ubuntu 22.04 (glibc 2.35): they run on Linux Mint 21 and newer.
+          - { os: ubuntu-22.04, asset: crafthub-linux-x86_64 }
+          - { os: ubuntu-22.04-arm, asset: crafthub-linux-aarch64 }
+          - { os: windows-latest, asset: crafthub-windows-x86_64.exe }
+          - { os: windows-11-arm, asset: crafthub-windows-aarch64.exe }
+          - { os: macos-14, asset: crafthub-macos-universal.zip }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash .github/scripts/install-rust.sh
       - name: Test
-        if: steps.version.outputs.skip != 'true'
         run: cargo test --locked
-
       - name: Build
-        if: steps.version.outputs.skip != 'true'
         run: |
-          cargo build --release --locked
-          mkdir dist
-          cp target/release/crafthub dist/crafthub-linux-x86_64
-          cd dist
-          ./crafthub-linux-x86_64 --version
-          sha256sum crafthub-linux-* > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          mkdir -p dist
+          case "$RUNNER_OS" in
+            macOS)
+              bash packaging/macos/bundle.sh dist
+              ;;
+            Windows)
+              cargo build --release --locked
+              cp target/release/crafthub.exe "dist/${{ matrix.asset }}"
+              "dist/${{ matrix.asset }}" --version
+              ;;
+            Linux)
+              cargo build --release --locked
+              cp target/release/crafthub "dist/${{ matrix.asset }}"
+              "dist/${{ matrix.asset }}" --version
+              ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
 
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum crafthub-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       - name: Publish release
-        if: steps.version.outputs.skip != 'true'
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber

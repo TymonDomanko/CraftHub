@@ -16,6 +16,7 @@ use crate::apps::{self, APPS, App};
 use crate::github::{self, pretty_version};
 use crate::hub::{self, HubRelease};
 use crate::install::{self, AppRelease};
+use crate::platform;
 use crate::state::{self, Installed};
 
 // ----------------------------------------------------------------------------- state shared with workers
@@ -114,6 +115,8 @@ struct Palette {
     warn_fg: Color32,
     banner: Color32,
     error: Color32,
+    /// Faint outline around progress bars, so their full width shows.
+    bar_outline: Color32,
 }
 
 fn palette(dark: bool) -> Palette {
@@ -132,6 +135,7 @@ fn palette(dark: bool) -> Palette {
             warn_fg: rgb(0xf8, 0xd0, 0x6a),
             banner: rgb(0x22, 0x33, 0x4a),
             error: rgb(0xff, 0x7b, 0x72),
+            bar_outline: rgb(0x4a, 0x4d, 0x57),
         }
     } else {
         Palette {
@@ -147,6 +151,7 @@ fn palette(dark: bool) -> Palette {
             warn_fg: rgb(0x8a, 0x5a, 0x00),
             banner: rgb(0xe3, 0xee, 0xfb),
             error: rgb(0xc0, 0x1c, 0x28),
+            bar_outline: rgb(0xc9, 0xcc, 0xd4),
         }
     }
 }
@@ -163,7 +168,8 @@ pub struct HubApp {
     order: Vec<&'static str>,
     /// Measured height of each card's content (without buttons), for lining up rows.
     content_heights: HashMap<&'static str, f32>,
-    fuse: bool,
+    /// A platform notice shown under the header (e.g. FUSE missing on Linux).
+    notice: Option<String>,
 }
 
 pub fn decode_png(bytes: &[u8]) -> (Vec<u8>, u32, u32) {
@@ -183,52 +189,14 @@ fn texture(ctx: &egui::Context, name: &str, png: &[u8]) -> TextureHandle {
     ctx.load_texture(name, img, TextureOptions::LINEAR)
 }
 
-/// Light or dark, from `CRAFTHUB_THEME` or the desktop's settings. winit can't see the
-/// system theme on X11 (which Cinnamon uses), so read Mint/GNOME's settings directly.
+/// Light or dark, from `CRAFTHUB_THEME` or (on Linux) the desktop's settings. On Windows
+/// and macOS, egui follows the system theme by itself.
 fn desktop_theme() -> Option<Theme> {
     match std::env::var("CRAFTHUB_THEME").ok().as_deref() {
-        Some("light") => return Some(Theme::Light),
-        Some("dark") => return Some(Theme::Dark),
-        _ => {}
+        Some("light") => Some(Theme::Light),
+        Some("dark") => Some(Theme::Dark),
+        _ => platform::prefers_dark().map(|dark| if dark { Theme::Dark } else { Theme::Light }),
     }
-    let get = |schema: &str, key: &str| -> Option<String> {
-        let out = std::process::Command::new("gsettings")
-            .args(["get", schema, key])
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()?;
-        out.status.success().then(|| {
-            String::from_utf8_lossy(&out.stdout)
-                .trim()
-                .trim_matches('\'')
-                .to_lowercase()
-        })
-    };
-    // Explicit light/dark preference (Mint 21.2+ "Appearance", GNOME 42+).
-    for (schema, key) in [
-        ("org.x.apps.portal", "color-scheme"),
-        ("org.gnome.desktop.interface", "color-scheme"),
-    ] {
-        match get(schema, key).as_deref() {
-            Some("prefer-dark") => return Some(Theme::Dark),
-            Some("prefer-light") => return Some(Theme::Light),
-            _ => {}
-        }
-    }
-    // Otherwise go by the GTK theme's name (e.g. Mint-Y-Dark-Aqua vs Mint-Y-Aqua).
-    for schema in [
-        "org.cinnamon.desktop.interface",
-        "org.gnome.desktop.interface",
-    ] {
-        if let Some(name) = get(schema, "gtk-theme").filter(|n| !n.is_empty()) {
-            return Some(if name.contains("dark") {
-                Theme::Dark
-            } else {
-                Theme::Light
-            });
-        }
-    }
-    None
 }
 
 fn setup_style(ctx: &egui::Context) {
@@ -310,13 +278,13 @@ impl HubApp {
             last_state_load: Instant::now(),
             order: APPS.iter().map(|a| a.id).collect(),
             content_heights: HashMap::new(),
-            fuse: install::have_fuse2(),
+            notice: platform::notice(),
         };
         app.reload_state();
         app.check_all();
         let (shared, ctx) = (app.shared.clone(), app.ctx.clone());
         thread::spawn(move || {
-            let changed = install::refresh_remote_icons();
+            let changed = install::refresh_icons();
             if !changed.is_empty() {
                 lock(&shared).new_icons.extend(changed.iter().map(|a| a.id));
                 ctx.request_repaint();
@@ -377,13 +345,14 @@ impl HubApp {
             Check::Done(Some(r)) => Some(r),
             _ => None,
         };
-        let has_appimage = rel.is_some_and(|r| r.appimage.is_some());
+        let has_build = rel.is_some_and(|r| r.asset.is_some());
+        let buildable = app.source_build && platform::SOURCE_BUILDS;
         let has_update = match (&inst, rel) {
-            (Some(i), Some(r)) if !i.source => has_appimage && r.tag() != i.version,
+            (Some(i), Some(r)) if !i.source => has_build && r.tag() != i.version,
             _ => false,
         };
         let can_update = inst.is_some() && (source || has_update);
-        let can_install = inst.is_none() && (has_appimage || app.source_build);
+        let can_install = inst.is_none() && (has_build || buildable);
 
         let mut parts = Vec::new();
         if let Some(i) = &inst {
@@ -400,7 +369,7 @@ impl HubApp {
                 format!("Couldn't check for updates ({short})")
             }
             Check::Done(None) => "No releases yet".to_string(),
-            Check::Done(Some(r)) if r.appimage.is_some() => {
+            Check::Done(Some(r)) if r.asset.is_some() => {
                 if inst
                     .as_ref()
                     .is_some_and(|i| !i.source && i.version == r.tag())
@@ -410,16 +379,15 @@ impl HubApp {
                     format!("Latest: v{}", pretty_version(r.tag()))
                 }
             }
-            Check::Done(Some(_)) if app.source_build && source => {
+            Check::Done(Some(_)) if buildable && source => {
                 "Rebuild pulls the latest source and recompiles".to_string()
             }
-            Check::Done(Some(_)) if app.source_build => {
-                "No Linux release yet, so Install builds it from \
+            Check::Done(Some(_)) if buildable => "No Linux release yet, so Install builds it from \
                 source (opens a terminal, takes 20–60 min the first time)"
-                    .to_string()
-            }
+                .to_string(),
             Check::Done(Some(_)) => format!(
-                "Latest release has no Linux {} AppImage",
+                "The latest release has no build for {} ({})",
+                platform::NAME,
                 github::arch_name()
             ),
         });
@@ -554,7 +522,7 @@ impl HubApp {
 
     fn start_download(&self, app: &'static App, verb: &'static str) {
         let rel = match &lock(&self.shared).cards[app.id].check {
-            Check::Done(Some(r)) if r.appimage.is_some() => r.clone(),
+            Check::Done(Some(r)) if r.asset.is_some() => r.clone(),
             _ => return,
         };
         self.set_busy(app.id, format!("{verb} v{}…", pretty_version(rel.tag())));
@@ -584,7 +552,7 @@ impl HubApp {
     }
 
     fn start_build(&self, app: &'static App) {
-        match install::start_source_build(app) {
+        match platform::start_source_build(app) {
             Ok(child) => {
                 let mut s = lock(&self.shared);
                 let c = s.cards.get_mut(app.id).expect("known app");
@@ -620,8 +588,8 @@ impl HubApp {
                 if v.busy.is_some() {
                     return;
                 }
-                let rel_has_appimage = matches!(&lock(&self.shared).cards[id].check, Check::Done(Some(r)) if r.appimage.is_some());
-                if app.source_build && !rel_has_appimage {
+                let rel_has_appimage = matches!(&lock(&self.shared).cards[id].check, Check::Done(Some(r)) if r.asset.is_some());
+                if app.source_build && platform::SOURCE_BUILDS && !rel_has_appimage {
                     self.start_build(app);
                 } else {
                     self.start_download(app, if installing { "Installing" } else { "Updating" });
@@ -645,7 +613,7 @@ impl HubApp {
                         .note = Some((format!("Couldn't open: {e}"), true));
                 }
             }
-            Action::Url(u) => install::open_url(&u),
+            Action::Url(u) => platform::open_url(&u),
             Action::Refresh => self.check_all(),
             Action::UpdateAll => {
                 for (id, v) in views {
@@ -758,7 +726,9 @@ impl HubApp {
                 ui.add(egui::Spinner::new());
                 ui.label(RichText::new(&b.label).size(12.5));
                 if let Some(f) = b.frac {
-                    ui.add(
+                    outlined_bar(
+                        ui,
+                        pal,
                         egui::ProgressBar::new(f)
                             .desired_width(160.0)
                             .desired_height(8.0),
@@ -865,24 +835,23 @@ impl HubApp {
             }
             match &v.busy {
                 Some(b) => {
-                    ui.label(RichText::new(&b.label).size(12.5).color(pal.muted));
+                    let label = match b.bytes {
+                        Some((done, total)) if total > 0 => format!(
+                            "{}  {:.1} / {:.1} MB",
+                            b.label,
+                            done as f64 / 1e6,
+                            total as f64 / 1e6
+                        ),
+                        _ => b.label.clone(),
+                    };
+                    ui.label(RichText::new(label).size(12.5).color(pal.muted));
                     let mut bar = egui::ProgressBar::new(b.frac.unwrap_or(0.0))
-                        .desired_height(10.0)
+                        .desired_height(8.0)
                         .fill(pal.accent);
-                    if let Some((done, total)) = b.bytes {
-                        bar = bar.text(
-                            RichText::new(format!(
-                                "{:.0} / {:.0} MB",
-                                done as f64 / 1e6,
-                                total as f64 / 1e6
-                            ))
-                            .size(10.5),
-                        );
-                    }
                     if b.frac.is_none() {
                         bar = bar.animate(true);
                     }
-                    ui.add(bar);
+                    outlined_bar(ui, pal, bar);
                 }
                 None => {
                     ui.label(RichText::new(&v.status).size(12.5).color(pal.muted));
@@ -956,6 +925,17 @@ fn button(ui: &mut egui::Ui, pal: &Palette, label: &str, enabled: bool, kind: Ki
     ui.add_enabled(enabled, b).clicked()
 }
 
+/// A progress bar with a faint outline, so you can see how far along it is.
+fn outlined_bar(ui: &mut egui::Ui, pal: &Palette, bar: egui::ProgressBar) {
+    let rect = ui.add(bar).rect;
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same((rect.height() / 2.0).round() as u8),
+        Stroke::new(1.0, pal.bar_outline),
+        egui::StrokeKind::Inside,
+    );
+}
+
 fn badge(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) {
     Frame::new()
         .fill(bg)
@@ -994,17 +974,16 @@ impl eframe::App for HubApp {
                 self.header(ui, &pal, checking, n_updates, &mut actions)
             });
 
-        if !self.fuse {
-            egui::Panel::top("fuse")
-                .frame(Frame::new().fill(pal.banner).inner_margin(Margin::symmetric(16, 8)))
+        if let Some(notice) = &self.notice {
+            egui::Panel::top("notice")
+                .frame(
+                    Frame::new()
+                        .fill(pal.banner)
+                        .inner_margin(Margin::symmetric(16, 8)),
+                )
                 .show_separator_line(false)
                 .show(ui, |ui| {
-                    ui.label(
-                        RichText::new(
-                            "FUSE 2 isn't installed, so apps start a little slower. Fix: sudo apt install libfuse2t64",
-                        )
-                        .size(12.5),
-                    );
+                    ui.label(RichText::new(notice).size(12.5));
                 });
         }
 

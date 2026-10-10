@@ -1,5 +1,5 @@
-//! What Craft Hub has installed, saved as JSON in `~/.local/share/crafthub/state.json`.
-//! The format is the same one the earlier Python version used, so installs carry over.
+//! What Craft Hub has installed, saved as `state.json` in Craft Hub's folder.
+//! On Linux the format is the one the earlier Python version used, so installs carry over.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -9,14 +9,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::install::Kind;
 use crate::paths;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Installed {
     /// Release tag (e.g. `v0.5.0`), or a version string for source builds.
     pub version: String,
-    /// The installed AppImage or binary.
+    /// What to launch: the AppImage or binary, the `.exe`, or the `.app` bundle.
     pub path: String,
+    /// How it was installed (missing in records from older versions: an AppImage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Kind>,
+    /// Windows installers: the command that uninstalls it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uninstaller: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<String>,
     /// Whether the download matched the release's SHA256SUMS.txt.
@@ -30,8 +37,9 @@ pub struct Installed {
 }
 
 impl Installed {
+    /// Still there? (`.app` bundles are folders.)
     pub fn exists(&self) -> bool {
-        Path::new(&self.path).is_file()
+        Path::new(&self.path).exists()
     }
 }
 

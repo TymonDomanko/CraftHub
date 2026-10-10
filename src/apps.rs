@@ -3,6 +3,15 @@
 /// GitHub owner of all the Crafting Apps.
 pub const OWNER: &str = "storytold";
 
+/// How a project names its release files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Naming {
+    /// `photocraft-0.5.0-windows-x64-portable.zip` and friends.
+    Crafting,
+    /// Tauri's `ArtCraft_0.32.0_x64-setup.exe` style.
+    Tauri,
+}
+
 pub struct App {
     /// Repository name and internal ID, e.g. `photocraft`.
     pub id: &'static str,
@@ -15,15 +24,17 @@ pub struct App {
     /// Path of the documentation inside the repo (the projects have no GitHub wiki).
     pub docs_path: &'static str,
     pub website: Option<&'static str>,
-    /// No Linux release: Install builds from source.
+    /// No Linux release: on Linux, Install builds it from source.
     pub source_build: bool,
+    pub naming: Naming,
     /// The app's own desktop ID / Wayland app_id.
     pub desktop_id: &'static str,
-    /// Bundled icon (for ArtCraft, a stand-in shown until its own icon is downloaded).
-    pub icon_png: &'static [u8],
-    /// Icon downloaded from the project itself instead of being redistributed here.
-    pub icon_url: Option<&'static str>,
+    /// The app's icon, downloaded from the project's own repo (none are redistributed here).
+    pub icon_url: &'static str,
 }
+
+/// Shown until an app's own icon has been downloaded (e.g. on first run while offline).
+pub const PLACEHOLDER_ICON: &[u8] = include_bytes!("../assets/icons/app-placeholder.png");
 
 impl App {
     pub fn repo_url(&self) -> String {
@@ -57,9 +68,16 @@ impl App {
     }
 }
 
-macro_rules! icon {
-    ($name:literal) => {
-        include_bytes!(concat!("../assets/icons/", $name, ".png"))
+/// Each Crafting App's 256 px icon in its own repo.
+macro_rules! crafting_icon {
+    ($id:literal) => {
+        concat!(
+            "https://raw.githubusercontent.com/storytold/",
+            $id,
+            "/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.",
+            $id,
+            ".png"
+        )
     };
 }
 
@@ -75,9 +93,9 @@ pub static APPS: &[App] = &[
         docs_path: "book/src",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.photocraft",
-        icon_png: icon!("photocraft"),
-        icon_url: None,
+        icon_url: crafting_icon!("photocraft"),
     },
     App {
         id: "vectorcraft",
@@ -89,9 +107,9 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.vectorcraft",
-        icon_png: icon!("vectorcraft"),
-        icon_url: None,
+        icon_url: crafting_icon!("vectorcraft"),
     },
     App {
         id: "designcraft",
@@ -104,9 +122,9 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.designcraft",
-        icon_png: icon!("designcraft"),
-        icon_url: None,
+        icon_url: crafting_icon!("designcraft"),
     },
     App {
         id: "lightcraft",
@@ -119,9 +137,9 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.lightcraft",
-        icon_png: icon!("lightcraft"),
-        icon_url: None,
+        icon_url: crafting_icon!("lightcraft"),
     },
     App {
         id: "filmcraft",
@@ -133,9 +151,9 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.filmcraft",
-        icon_png: icon!("filmcraft"),
-        icon_url: None,
+        icon_url: crafting_icon!("filmcraft"),
     },
     App {
         id: "effectcraft",
@@ -148,9 +166,9 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.effectcraft",
-        icon_png: icon!("effectcraft"),
-        icon_url: None,
+        icon_url: crafting_icon!("effectcraft"),
     },
     App {
         id: "pdfcraft",
@@ -162,9 +180,9 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.pdfcraft",
-        icon_png: icon!("pdfcraft"),
-        icon_url: None,
+        icon_url: crafting_icon!("pdfcraft"),
     },
     App {
         id: "artcraft",
@@ -176,12 +194,9 @@ pub static APPS: &[App] = &[
         docs_path: "_docs",
         website: Some("https://getartcraft.com/"),
         source_build: true,
+        naming: Naming::Tauri,
         desktop_id: "ai.artcraft.app",
-        icon_png: icon!("artcraft"),
-        // ArtCraft's logo is a trademark we don't redistribute; fetch it from their repo.
-        icon_url: Some(
-            "https://raw.githubusercontent.com/storytold/artcraft/main/crates/desktop/artcraft/icons/128x128@2x.png",
-        ),
+        icon_url: "https://raw.githubusercontent.com/storytold/artcraft/main/crates/desktop/artcraft/icons/128x128@2x.png",
     },
 ];
 
@@ -199,8 +214,17 @@ mod tests {
         for a in APPS {
             assert!(by_id(a.id).is_some());
             assert!(!a.comment().is_empty() && a.comment().len() < a.blurb.len());
-            assert!(a.icon_png.starts_with(b"\x89PNG"));
+            assert!(
+                a.icon_url
+                    .starts_with("https://raw.githubusercontent.com/storytold/")
+            );
+            assert!(a.icon_url.contains(a.id) && a.icon_url.ends_with(".png"));
         }
         assert_eq!(by_id("pdfcraft").unwrap().comment(), "The PDF workbench");
+        assert_eq!(
+            by_id("photocraft").unwrap().icon_url,
+            "https://raw.githubusercontent.com/storytold/photocraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png"
+        );
+        assert!(PLACEHOLDER_ICON.starts_with(b"\x89PNG"));
     }
 }
