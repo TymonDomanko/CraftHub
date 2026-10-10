@@ -121,7 +121,7 @@ pub static APPS: &[App] = &[
         id: "designcraft",
         name: "DesignCraft",
         like: Some("InDesign"),
-        category: "Graphics;Publishing;Office;",
+        category: "Graphics;Publishing;",
         blurb: "Page layout and publishing: threaded multi-column text frames, parent pages, text \
                 wrap and its own paragraph composer. IDML import/export and PNG export, with PDF \
                 export on the roadmap.",
@@ -137,7 +137,7 @@ pub static APPS: &[App] = &[
         id: "lightcraft",
         name: "LightCraft",
         like: Some("Lightroom"),
-        category: "Graphics;Photography;RasterGraphics;",
+        category: "Graphics;2DGraphics;RasterGraphics;Photography;",
         blurb: "Photo library and non-destructive raw development in a 32-bit float, wide-gamut \
                 pipeline, with masking, presets, profiles, a colour mixer and cinematic colour \
                 grading.",
@@ -168,7 +168,7 @@ pub static APPS: &[App] = &[
         id: "effectcraft",
         name: "EffectCraft",
         like: Some("After Effects"),
-        category: "AudioVideo;Video;Graphics;",
+        category: "AudioVideo;Video;",
         blurb: "Motion graphics and compositing: compositions, layers, keyframes, 300+ effects, \
                 layer styles, expressions, 3D cameras and lights, a render queue and built-in \
                 Lottie import/export.",
@@ -184,7 +184,7 @@ pub static APPS: &[App] = &[
         id: "pdfcraft",
         name: "PDFCraft",
         like: Some("Acrobat"),
-        category: "Office;Viewer;Graphics;",
+        category: "Office;Viewer;",
         blurb: "The PDF workbench: read, search, organise, combine, split and secure PDFs, with \
                 comments, forms, layers and attachments. No account and no telemetry.",
         docs_path: "docs",
