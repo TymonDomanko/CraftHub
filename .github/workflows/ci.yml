@@ -42,22 +42,22 @@ jobs:
       - uses: actions/checkout@v5
       - run: bash .github/scripts/install-rust.sh
       - name: Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: bash .github/scripts/run.sh clippy cargo clippy --locked --all-targets -- -D warnings
       - name: Unit tests
-        run: cargo test --locked
+        run: bash .github/scripts/run.sh tests cargo test --locked
       - name: Build
-        run: cargo build --locked
+        run: bash .github/scripts/run.sh build cargo build --locked
       - name: End-to-end (${{ matrix.app_name }})
         run: |
           bin=target/debug/crafthub
           [ "$RUNNER_OS" = Windows ] && bin=target/debug/crafthub.exe
-          bash .github/scripts/e2e.sh "$bin" "${{ matrix.app }}" "${{ matrix.app_name }}"
+          bash .github/scripts/run.sh e2e bash .github/scripts/e2e.sh "$bin" "${{ matrix.app }}" "${{ matrix.app_name }}"
       - name: End-to-end (${{ matrix.extra_name }})
         if: matrix.extra
         run: |
           bin=target/debug/crafthub
           [ "$RUNNER_OS" = Windows ] && bin=target/debug/crafthub.exe
-          bash .github/scripts/e2e.sh "$bin" "${{ matrix.extra }}" "${{ matrix.extra_name }}"
+          bash .github/scripts/run.sh e2e bash .github/scripts/e2e.sh "$bin" "${{ matrix.extra }}" "${{ matrix.extra_name }}"
       - name: Screenshot
         if: runner.os != 'Linux'
         continue-on-error: true
@@ -79,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: bash .github/scripts/install-rust.sh
-      - run: bash packaging/macos/bundle.sh dist
+      - run: bash .github/scripts/run.sh bundle bash packaging/macos/bundle.sh dist
       - name: Check the bundle
         run: |
           cd dist && rm -rf check && mkdir check && ditto -x -k crafthub-macos-universal.zip check
