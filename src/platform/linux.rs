@@ -396,6 +396,7 @@ pub fn start_source_build(app: &App) -> Result<Child, String> {
 
 /// Install a binary built on this machine (ArtCraft from source).
 pub fn register_local(app: &App, built: &Path, version: &str) -> Result<(), String> {
+    install::ensure_icon(app);
     fs::create_dir_all(paths::apps_dir()).map_err(|e| e.to_string())?;
     let is_appimage = built.to_string_lossy().ends_with(".AppImage");
     let dest = paths::apps_dir().join(if is_appimage {

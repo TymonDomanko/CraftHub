@@ -115,6 +115,8 @@ struct Palette {
     warn_fg: Color32,
     banner: Color32,
     error: Color32,
+    /// Faint outline around progress bars, so their full width shows.
+    bar_outline: Color32,
 }
 
 fn palette(dark: bool) -> Palette {
@@ -133,6 +135,7 @@ fn palette(dark: bool) -> Palette {
             warn_fg: rgb(0xf8, 0xd0, 0x6a),
             banner: rgb(0x22, 0x33, 0x4a),
             error: rgb(0xff, 0x7b, 0x72),
+            bar_outline: rgb(0x4a, 0x4d, 0x57),
         }
     } else {
         Palette {
@@ -148,6 +151,7 @@ fn palette(dark: bool) -> Palette {
             warn_fg: rgb(0x8a, 0x5a, 0x00),
             banner: rgb(0xe3, 0xee, 0xfb),
             error: rgb(0xc0, 0x1c, 0x28),
+            bar_outline: rgb(0xc9, 0xcc, 0xd4),
         }
     }
 }
@@ -280,7 +284,7 @@ impl HubApp {
         app.check_all();
         let (shared, ctx) = (app.shared.clone(), app.ctx.clone());
         thread::spawn(move || {
-            let changed = install::refresh_remote_icons();
+            let changed = install::refresh_icons();
             if !changed.is_empty() {
                 lock(&shared).new_icons.extend(changed.iter().map(|a| a.id));
                 ctx.request_repaint();
@@ -722,7 +726,9 @@ impl HubApp {
                 ui.add(egui::Spinner::new());
                 ui.label(RichText::new(&b.label).size(12.5));
                 if let Some(f) = b.frac {
-                    ui.add(
+                    outlined_bar(
+                        ui,
+                        pal,
                         egui::ProgressBar::new(f)
                             .desired_width(160.0)
                             .desired_height(8.0),
@@ -829,24 +835,23 @@ impl HubApp {
             }
             match &v.busy {
                 Some(b) => {
-                    ui.label(RichText::new(&b.label).size(12.5).color(pal.muted));
+                    let label = match b.bytes {
+                        Some((done, total)) if total > 0 => format!(
+                            "{}  {:.1} / {:.1} MB",
+                            b.label,
+                            done as f64 / 1e6,
+                            total as f64 / 1e6
+                        ),
+                        _ => b.label.clone(),
+                    };
+                    ui.label(RichText::new(label).size(12.5).color(pal.muted));
                     let mut bar = egui::ProgressBar::new(b.frac.unwrap_or(0.0))
-                        .desired_height(10.0)
+                        .desired_height(8.0)
                         .fill(pal.accent);
-                    if let Some((done, total)) = b.bytes {
-                        bar = bar.text(
-                            RichText::new(format!(
-                                "{:.0} / {:.0} MB",
-                                done as f64 / 1e6,
-                                total as f64 / 1e6
-                            ))
-                            .size(10.5),
-                        );
-                    }
                     if b.frac.is_none() {
                         bar = bar.animate(true);
                     }
-                    ui.add(bar);
+                    outlined_bar(ui, pal, bar);
                 }
                 None => {
                     ui.label(RichText::new(&v.status).size(12.5).color(pal.muted));
@@ -918,6 +923,17 @@ fn button(ui: &mut egui::Ui, pal: &Palette, label: &str, enabled: bool, kind: Ki
         b = b.fill(f);
     }
     ui.add_enabled(enabled, b).clicked()
+}
+
+/// A progress bar with a faint outline, so you can see how far along it is.
+fn outlined_bar(ui: &mut egui::Ui, pal: &Palette, bar: egui::ProgressBar) {
+    let rect = ui.add(bar).rect;
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same((rect.height() / 2.0).round() as u8),
+        Stroke::new(1.0, pal.bar_outline),
+        egui::StrokeKind::Inside,
+    );
 }
 
 fn badge(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) {

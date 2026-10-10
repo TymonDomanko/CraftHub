@@ -323,7 +323,7 @@ fn split_command(cmd: &str) -> (String, Vec<String>) {
         }
     } else {
         // Unquoted: the program runs up to ".exe".
-        match cmd.to_lowercase().find(".exe") {
+        match cmd.to_ascii_lowercase().find(".exe") {
             Some(i) => (cmd[..i + 4].to_string(), &cmd[i + 4..]),
             None => (cmd.to_string(), ""),
         }

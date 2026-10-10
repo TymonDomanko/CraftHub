@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::apps::{APPS, App, Naming, OWNER};
+use crate::apps::{self, APPS, App, Naming, OWNER};
 use crate::github::{self, Release};
 use crate::paths;
 use crate::platform;
@@ -174,6 +174,7 @@ pub fn install_release(
         .asset
         .as_ref()
         .ok_or_else(|| format!("The latest release has no build for {}", platform::NAME))?;
+    ensure_icon(app);
     let file = paths::downloads_dir().join(&asset.name);
     let verified = github::download_verified(
         &asset.url,
@@ -218,52 +219,69 @@ fn cached_icon_path(app: &App) -> PathBuf {
         .join(format!("{}.png", app.id))
 }
 
-/// The app's icon: the downloaded one when it has an `icon_url`, else the bundled one.
+/// The app's icon: the copy downloaded from its repo, or a stand-in until there is one.
 pub fn icon_bytes(app: &App) -> Cow<'static, [u8]> {
-    let cached = app
-        .icon_url
-        .and_then(|_| fs::read(cached_icon_path(app)).ok())
-        .filter(|b| b.starts_with(b"\x89PNG"));
-    match cached {
-        Some(b) => Cow::Owned(b),
-        None => Cow::Borrowed(app.icon_png),
+    match fs::read(cached_icon_path(app)) {
+        Ok(b) if b.starts_with(b"\x89PNG") => Cow::Owned(b),
+        _ => Cow::Borrowed(apps::PLACEHOLDER_ICON),
     }
 }
 
-/// Download icons we don't redistribute (ArtCraft's logo) from the projects themselves,
-/// at most once a week. Returns the apps whose icon changed.
-pub fn refresh_remote_icons() -> Vec<&'static App> {
-    let mut changed = Vec::new();
-    for app in APPS {
-        let Some(url) = app.icon_url else { continue };
-        let path = cached_icon_path(app);
-        let fresh = fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .map(|t| t.elapsed().unwrap_or_default() < Duration::from_secs(7 * 86400))
-            .unwrap_or(false);
-        if fresh {
-            continue;
-        }
-        let url = match std::env::var("CRAFTHUB_RAW") {
-            Ok(base) => url.replace("https://raw.githubusercontent.com", &base),
-            Err(_) => url.to_string(),
-        };
-        let Ok(mut resp) = github::agent().get(&url).call() else {
-            continue;
-        };
-        let Ok(bytes) = resp.body_mut().with_config().limit(4 << 20).read_to_vec() else {
-            continue;
-        };
-        if !bytes.starts_with(b"\x89PNG") {
-            continue;
-        }
-        let old = fs::read(&path).ok();
-        let _ = fs::create_dir_all(path.parent().unwrap_or(&path));
-        if fs::write(&path, &bytes).is_ok() && old.as_deref() != Some(&bytes[..]) {
-            if let Some(info) = state::installed(app.id) {
-                platform::icon_updated(app, &info);
-            }
-            changed.push(app);
+/// Download one app's icon from its repo if the cached copy is missing or a week old.
+/// Returns true if the icon changed.
+fn fetch_icon(app: &App) -> bool {
+    let path = cached_icon_path(app);
+    let fresh = fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .map(|t| t.elapsed().unwrap_or_default() < Duration::from_secs(7 * 86400))
+        .unwrap_or(false);
+    if fresh {
+        return false;
+    }
+    let url = match std::env::var("CRAFTHUB_RAW") {
+        Ok(base) => app
+            .icon_url
+            .replace("https://raw.githubusercontent.com", &base),
+        Err(_) => app.icon_url.to_string(),
+    };
+    let Ok(mut resp) = github::agent().get(&url).call() else {
+        return false;
+    };
+    let Ok(bytes) = resp.body_mut().with_config().limit(4 << 20).read_to_vec() else {
+        return false;
+    };
+    if !bytes.starts_with(b"\x89PNG") {
+        return false;
+    }
+    let old = fs::read(&path).ok();
+    let _ = fs::create_dir_all(path.parent().unwrap_or(&path));
+    fs::write(&path, &bytes).is_ok() && old.as_deref() != Some(&bytes[..])
+}
+
+/// Make sure an app's icon is downloaded (before installing it, so its menu entry or
+/// shortcut gets the real icon).
+pub fn ensure_icon(app: &App) {
+    if !cached_icon_path(app).exists() {
+        fetch_icon(app);
+    }
+}
+
+/// Download (or refresh, weekly) every app's icon from its own repo, in parallel.
+/// Returns the apps whose icon changed, after updating their menu entries.
+pub fn refresh_icons() -> Vec<&'static App> {
+    let changed: Vec<&'static App> = std::thread::scope(|scope| {
+        let handles: Vec<_> = APPS
+            .iter()
+            .map(|app| (app, scope.spawn(|| fetch_icon(app))))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|(app, h)| h.join().unwrap_or(false).then_some(app))
+            .collect()
+    });
+    for app in &changed {
+        if let Some(info) = state::installed(app.id) {
+            platform::icon_updated(app, &info);
         }
     }
     changed

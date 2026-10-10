@@ -1,12 +1,13 @@
 # Icon credits
 
-The PhotoCraft, VectorCraft, DesignCraft, LightCraft, FilmCraft, EffectCraft and PDFCraft icons
-are the official app icons from each project's `assets/app-icon/` folder
-(`github.com/storytold/<app>`), made by the ArtCraft team and licensed MIT OR Apache-2.0
-(see `LICENSE-app-icons.txt`).
+None of the Crafting Apps' icons are stored in this repository. Craft Hub downloads each app's
+icon from that project's own GitHub repository when it runs (and refreshes it weekly), so the
+icons always match the apps and stay with their owners:
 
-ArtCraft's logo is a trademark of the ArtCraft Team and is **not** included here. Craft Hub
-downloads it from the ArtCraft repository at runtime to show next to the app.
-`artcraft.png` (a paint palette) is an original stand-in, shown until that download succeeds.
+- PhotoCraft, VectorCraft, DesignCraft, LightCraft, FilmCraft, EffectCraft and PDFCraft:
+  `assets/app-icon/hicolor/256x256/apps/ai.storyteller.<app>.png` in `github.com/storytold/<app>`
+- ArtCraft: `crates/desktop/artcraft/icons/128x128@2x.png` in `github.com/storytold/artcraft`
+  (the ArtCraft logo is a trademark of the ArtCraft Team)
 
-`crafthub.svg` and `crafthub.png` are original to Craft Hub.
+`app-placeholder.png` (a paint palette) is shown until an app's icon has been downloaded.
+It and the Craft Hub icons (`crafthub.svg`, `.png`, `.ico`, `.icns`) are original to Craft Hub.

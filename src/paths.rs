@@ -42,6 +42,7 @@ pub fn local_app_data() -> PathBuf {
 
 /// Installed apps (AppImages on Linux, unpacked folders on Windows).
 /// On macOS apps go to `~/Applications` instead.
+#[cfg(not(target_os = "macos"))]
 pub fn apps_dir() -> PathBuf {
     hub_dir().join("apps")
 }

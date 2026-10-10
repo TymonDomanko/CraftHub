@@ -6,12 +6,14 @@ set -uo pipefail
 title="$1"
 shift
 log="$(mktemp)"
+export CARGO_TERM_COLOR=never
 "$@" 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 if [ "$status" -ne 0 ]; then
   # Compiler errors with context, or else the end of the output.
-  details=$(grep -E -A14 '^(error|warning)(\[|:)|FAIL|panicked' "$log" | head -c 30000)
-  [ -n "$details" ] || details=$(tail -c 8000 "$log")
+  details=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -v -E '^ *(Compiling|Checking|Downloaded|Downloading) ' \
+    | grep -E -A8 '^(error|warning)(\[|:)|FAIL|panicked' | head -c 3500)
+  [ -n "$details" ] || details=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | tail -c 3000)
   details=${details//'%'/'%25'}
   details=${details//$'\r'/}
   details=${details//$'\n'/'%0A'}
