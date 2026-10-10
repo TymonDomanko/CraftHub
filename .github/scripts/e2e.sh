@@ -30,7 +30,7 @@ case "$RUNNER_OS" in
   Windows)
     test -f "$path" || die "no .exe"
     test ! -f "$(dirname "$path")/portable.txt" || die "portable.txt should have been removed"
-    test -f "$APPDATA/Microsoft/Windows/Start Menu/Programs/$NAME.lnk" || die "no Start Menu shortcut"
+    test -f "$(native "$APPDATA")/Microsoft/Windows/Start Menu/Programs/$NAME.lnk" || die "no Start Menu shortcut"
     ;;
   macOS)
     case "$path" in "$HOME/Applications/"*.app) ;; *) die "not an .app in ~/Applications: $path" ;; esac
@@ -47,8 +47,19 @@ say "uninstall $APP"
 [ ! -e "$path" ] || die "$path is still there"
 case "$RUNNER_OS" in
   Linux) test ! -f "$HOME/.local/share/applications/ai.storyteller.$APP.desktop" || die "menu entry left behind" ;;
-  Windows) test ! -f "$APPDATA/Microsoft/Windows/Start Menu/Programs/$NAME.lnk" || die "shortcut left behind" ;;
+  Windows) test ! -f "$(native "$APPDATA")/Microsoft/Windows/Start Menu/Programs/$NAME.lnk" || die "shortcut left behind" ;;
 esac
+
+say "delete $APP's own settings (clean uninstall)"
+case "$RUNNER_OS" in
+  Linux) data="$HOME/.config/$APP" ;;
+  Windows) data="$(native "$APPDATA")/$NAME" ;;
+  macOS) data="$HOME/Library/Application Support/$NAME" ;;
+esac
+mkdir -p "$data/Presets"
+echo '{}' > "$data/preferences.json"
+"$BIN" --delete-data "$APP"
+[ ! -e "$data" ] || die "settings left behind in $data"
 
 say "install Craft Hub itself"
 "$BIN" --install-self
@@ -58,8 +69,8 @@ case "$RUNNER_OS" in
     test -f "$HOME/.local/share/applications/crafthub.desktop" || die "no Craft Hub menu entry"
     ;;
   Windows)
-    hub="$LOCALAPPDATA/Programs/CraftHub/crafthub.exe"
-    test -f "$APPDATA/Microsoft/Windows/Start Menu/Programs/Craft Hub.lnk" || die "no Craft Hub shortcut"
+    hub="$(native "$LOCALAPPDATA")/Programs/CraftHub/crafthub.exe"
+    test -f "$(native "$APPDATA")/Microsoft/Windows/Start Menu/Programs/Craft Hub.lnk" || die "no Craft Hub shortcut"
     reg query 'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\CraftHub' //v DisplayVersion \
       || die "no Apps & features entry"
     ;;
@@ -69,8 +80,16 @@ case "$RUNNER_OS" in
 esac
 "$(native "$hub")" --version
 
-say "uninstall Craft Hub itself"
-"$BIN" --uninstall-self
+say "uninstall Craft Hub itself, with the apps it installed"
+"$BIN" --install "$APP" >/dev/null
+"$BIN" --uninstall-self --all
 test ! -e "$(native "$hub")" || die "Craft Hub is still installed"
+case "$RUNNER_OS" in
+  Linux) hubdir="$HOME/.local/share/crafthub" ;;
+  Windows) hubdir="$(native "$LOCALAPPDATA")/CraftHub" ;;
+  macOS) hubdir="$HOME/Library/Application Support/CraftHub" ;;
+esac
+[ ! -e "$hubdir" ] || die "Craft Hub's folder is still there: $hubdir"
+[ ! -e "$path" ] || die "$APP is still installed"
 
 say "all good"

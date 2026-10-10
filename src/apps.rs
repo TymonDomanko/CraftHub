@@ -31,6 +31,8 @@ pub struct App {
     pub desktop_id: &'static str,
     /// The app's icon, downloaded from the project's own repo (none are redistributed here).
     pub icon_url: &'static str,
+    /// Other names the app's settings folders may use (besides its id, name and desktop id).
+    pub data_aliases: &'static [&'static str],
 }
 
 /// Shown until an app's own icon has been downloaded (e.g. on first run while offline).
@@ -96,6 +98,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Crafting,
         desktop_id: "ai.storyteller.photocraft",
         icon_url: crafting_icon!("photocraft"),
+        data_aliases: &[],
     },
     App {
         id: "vectorcraft",
@@ -110,6 +113,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Crafting,
         desktop_id: "ai.storyteller.vectorcraft",
         icon_url: crafting_icon!("vectorcraft"),
+        data_aliases: &[],
     },
     App {
         id: "designcraft",
@@ -125,6 +129,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Crafting,
         desktop_id: "ai.storyteller.designcraft",
         icon_url: crafting_icon!("designcraft"),
+        data_aliases: &[],
     },
     App {
         id: "lightcraft",
@@ -140,6 +145,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Crafting,
         desktop_id: "ai.storyteller.lightcraft",
         icon_url: crafting_icon!("lightcraft"),
+        data_aliases: &[],
     },
     App {
         id: "filmcraft",
@@ -154,6 +160,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Crafting,
         desktop_id: "ai.storyteller.filmcraft",
         icon_url: crafting_icon!("filmcraft"),
+        data_aliases: &[],
     },
     App {
         id: "effectcraft",
@@ -169,6 +176,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Crafting,
         desktop_id: "ai.storyteller.effectcraft",
         icon_url: crafting_icon!("effectcraft"),
+        data_aliases: &[],
     },
     App {
         id: "pdfcraft",
@@ -183,6 +191,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Crafting,
         desktop_id: "ai.storyteller.pdfcraft",
         icon_url: crafting_icon!("pdfcraft"),
+        data_aliases: &["PrintCraft"],
     },
     App {
         id: "artcraft",
@@ -197,6 +206,7 @@ pub static APPS: &[App] = &[
         naming: Naming::Tauri,
         desktop_id: "ai.artcraft.app",
         icon_url: "https://raw.githubusercontent.com/storytold/artcraft/main/crates/desktop/artcraft/icons/128x128@2x.png",
+        data_aliases: &[],
     },
 ];
 

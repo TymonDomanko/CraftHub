@@ -202,10 +202,129 @@ pub fn install_release(
     .map_err(|e| e.to_string())
 }
 
+/// Uninstall an app and everything Craft Hub created for it (menu entry or shortcut, icons,
+/// leftover downloads and update folders). The app's own settings are left alone; see
+/// [`app_data`] and [`delete_app_data`].
 pub fn uninstall(app: &App) -> Result<(), String> {
     let info = state::load().remove(app.id);
     platform::remove_package(app, info.as_ref())?;
+    remove_leftover_downloads(app);
     state::update(app.id, None).map_err(|e| e.to_string())
+}
+
+/// Half-finished or leftover downloads of this app's packages.
+fn remove_leftover_downloads(app: &App) {
+    let prefixes = [
+        app.id.to_lowercase(),
+        format!("{}_", app.name.to_lowercase()),
+    ];
+    for e in fs::read_dir(paths::downloads_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        if prefixes.iter().any(|p| name.starts_with(p.as_str())) {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+}
+
+/// Names an app's settings folders may use: its id, name, desktop id and aliases.
+pub fn data_names(app: &App) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for n in [app.id, app.name, app.desktop_id]
+        .iter()
+        .chain(app.data_aliases)
+    {
+        for v in [n.to_string(), n.to_lowercase()] {
+            if !names.contains(&v) {
+                names.push(v);
+            }
+        }
+    }
+    names
+}
+
+/// Where the app keeps its settings, caches and saved data on this computer (only the
+/// ones that exist). These are the app's own files, not Craft Hub's.
+pub fn app_data(app: &App) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut seen = Vec::new();
+    for p in platform::data_locations(app, &data_names(app)) {
+        if !p.exists() {
+            continue;
+        }
+        // Folder names are case-insensitive on Windows and macOS: don't list one twice.
+        let key = fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
+        let is_hub = key
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("crafthub"));
+        let key = key.to_string_lossy().to_lowercase();
+        if !seen.contains(&key) && !is_hub {
+            seen.push(key);
+            found.push(p);
+        }
+    }
+    found
+}
+
+/// Total size of files under `paths`, in bytes.
+pub fn size_of(paths: &[PathBuf]) -> u64 {
+    fn walk(p: &std::path::Path) -> u64 {
+        match fs::symlink_metadata(p) {
+            Ok(m) if m.is_dir() => fs::read_dir(p)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| walk(&e.path()))
+                .sum(),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        }
+    }
+    paths.iter().map(|p| walk(p)).sum()
+}
+
+/// Delete the app's settings, caches and saved data. Only for apps that aren't installed.
+pub fn delete_app_data(app: &App) -> Result<(), String> {
+    if state::installed(app.id).is_some() {
+        return Err(format!("Uninstall {} first", app.name));
+    }
+    let mut failed = Vec::new();
+    for p in app_data(app) {
+        let r = if p.is_dir() {
+            fs::remove_dir_all(&p)
+        } else {
+            fs::remove_file(&p)
+        };
+        if r.is_err() {
+            failed.push(p.display().to_string());
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Couldn't delete (is {} still open?): {}",
+            app.name,
+            failed.join(", ")
+        ))
+    }
+}
+
+/// Human-readable size, e.g. "2.4 MB".
+pub fn human_size(bytes: u64) -> String {
+    let b = bytes as f64;
+    if b >= 1e9 {
+        format!("{:.1} GB", b / 1e9)
+    } else if b >= 1e6 {
+        format!("{:.1} MB", b / 1e6)
+    } else if b >= 1e3 {
+        format!("{:.0} KB", b / 1e3)
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 pub fn launch(app: &App) -> Result<(), String> {
@@ -417,6 +536,22 @@ mod tests {
             "ArtCraft_0.32.0_universal.dmg"
         );
         assert_eq!(guess_asset(ac, "0.32.0", "linux", "x86_64"), None);
+    }
+
+    #[test]
+    fn data_folder_names() {
+        let names = data_names(by_id("pdfcraft").unwrap());
+        for n in [
+            "pdfcraft",
+            "PDFCraft",
+            "ai.storyteller.pdfcraft",
+            "PrintCraft",
+            "printcraft",
+        ] {
+            assert!(names.contains(&n.to_string()), "{n} missing from {names:?}");
+        }
+        assert_eq!(human_size(2_400_000), "2.4 MB");
+        assert_eq!(human_size(512), "512 bytes");
     }
 
     #[test]

@@ -372,6 +372,20 @@ pub fn launch(_app: &App, info: &Installed) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Where an app may keep settings, caches and data: `%APPDATA%` and `%LOCALAPPDATA%`,
+/// under any of its names.
+pub fn data_locations(_app: &App, names: &[String]) -> Vec<PathBuf> {
+    let roaming = std::env::var_os("APPDATA").map(PathBuf::from);
+    let bases: Vec<PathBuf> = roaming
+        .into_iter()
+        .chain([paths::local_app_data()])
+        .collect();
+    bases
+        .iter()
+        .flat_map(|b| names.iter().map(move |n| b.join(n)))
+        .collect()
+}
+
 /// Shortcuts use the app's own icon, so nothing to update.
 pub fn icon_updated(_app: &App, _info: &Installed) {}
 
@@ -444,8 +458,13 @@ pub fn install_self() -> Result<PathBuf, String> {
         ("Publisher", "Tymon Domanko".to_string()),
         ("DisplayIcon", format!("\"{t}\",0")),
         ("InstallLocation", dir.to_string_lossy().to_string()),
-        ("UninstallString", format!("\"{t}\" --uninstall-self")),
-        ("QuietUninstallString", format!("\"{t}\" --uninstall-self")),
+        // The apps live in Craft Hub's folder, so removing Craft Hub removes them too
+        // (their own settings in %APPDATA% are kept).
+        ("UninstallString", format!("\"{t}\" --uninstall-self --all")),
+        (
+            "QuietUninstallString",
+            format!("\"{t}\" --uninstall-self --all"),
+        ),
         (
             "URLInfoAbout",
             "https://github.com/TymonDomanko/CraftHub".to_string(),
@@ -470,10 +489,11 @@ pub fn uninstall_self() -> Result<(), String> {
     let target = installed_hub_path();
     let dir = target.parent().unwrap_or(&target).to_path_buf();
     if running_installed_copy() {
-        // A running program can't delete itself; remove the folder once we've exited.
+        // A running program can't delete itself. Keep trying (for up to two minutes) to
+        // remove the folder until Craft Hub has exited.
+        let d = dir.to_string_lossy();
         let cmd = format!(
-            "ping -n 3 127.0.0.1 >NUL & rmdir /S /Q \"{}\"",
-            dir.to_string_lossy()
+            "for /L %i in (1,1,60) do @(if exist \"{d}\" (ping -n 3 127.0.0.1 >NUL & rmdir /S /Q \"{d}\" 2>NUL))"
         );
         let _ = hidden("cmd")
             .args(["/C", &cmd])

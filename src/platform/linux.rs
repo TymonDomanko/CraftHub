@@ -285,6 +285,25 @@ pub fn launch(app: &App, info: &Installed) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Where an app may keep settings, caches and data: the XDG config, data, cache and state
+/// folders, under any of its names.
+pub fn data_locations(_app: &App, names: &[String]) -> Vec<PathBuf> {
+    let xdg = |var: &str, default: &str| match std::env::var_os(var) {
+        Some(v) if !v.is_empty() => PathBuf::from(v),
+        _ => paths::home().join(default),
+    };
+    let bases = [
+        xdg("XDG_CONFIG_HOME", ".config"),
+        xdg("XDG_DATA_HOME", ".local/share"),
+        xdg("XDG_CACHE_HOME", ".cache"),
+        xdg("XDG_STATE_HOME", ".local/state"),
+    ];
+    bases
+        .iter()
+        .flat_map(|b| names.iter().map(move |n| b.join(n)))
+        .collect()
+}
+
 pub fn icon_updated(app: &App, info: &Installed) {
     let _ = write_menu_entry(app, &info.path);
 }
