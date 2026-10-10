@@ -151,7 +151,10 @@ pub fn data_locations(app: &App, names: &[String]) -> Vec<PathBuf> {
     let lib = paths::home().join("Library");
     let mut v: Vec<PathBuf> = ["Application Support", "Caches", "Logs"]
         .iter()
-        .flat_map(|b| names.iter().map(move |n| lib.join(b).join(n)))
+        .flat_map(|b| {
+            let base = lib.join(b);
+            names.iter().map(move |n| base.join(n))
+        })
         .collect();
     let id = app.desktop_id;
     v.extend([
