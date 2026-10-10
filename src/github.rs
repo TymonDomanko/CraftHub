@@ -21,29 +21,40 @@ pub fn web_base() -> String {
 pub fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
-        ureq::Agent::config_builder()
+        let builder = ureq::Agent::config_builder()
             .user_agent(format!("CraftHub/{}", env!("CARGO_PKG_VERSION")))
             .timeout_connect(Some(Duration::from_secs(20)))
-            .timeout_recv_response(Some(Duration::from_secs(30)))
-            .build()
-            .into()
+            .timeout_recv_response(Some(Duration::from_secs(30)));
+        // Windows and macOS use the system's TLS (and its certificate store).
+        #[cfg(not(target_os = "linux"))]
+        let builder = builder.tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .build(),
+        );
+        builder.build().into()
     })
 }
 
-/// Name tokens that identify this machine's CPU in release asset names.
-pub fn arch_tokens() -> &'static [&'static str] {
-    match std::env::consts::ARCH {
-        "x86_64" => &["x86_64", "amd64"],
-        "aarch64" => &["aarch64", "arm64"],
-        other => {
-            static OTHER: OnceLock<[&'static str; 1]> = OnceLock::new();
-            OTHER.get_or_init(|| [Box::leak(other.to_string().into_boxed_str())])
-        }
-    }
+/// A GitHub token, if one is set (raises the API rate limit; used in CI).
+fn token() -> Option<String> {
+    ["CRAFTHUB_GITHUB_TOKEN", "GITHUB_TOKEN"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
 }
 
+/// This machine's CPU: `x86_64` or `aarch64`.
 pub fn arch_name() -> &'static str {
-    arch_tokens()[0]
+    std::env::consts::ARCH
+}
+
+/// Name tokens that identify a CPU in release asset names.
+pub fn arch_tokens(arch: &str) -> &'static [&'static str] {
+    match arch {
+        "x86_64" => &["x86_64", "amd64", "x64"],
+        "aarch64" => &["aarch64", "arm64"],
+        _ => &[],
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,11 +108,15 @@ fn with_retry<T>(mut f: impl FnMut() -> Result<T, ureq::Error>) -> Result<T, ure
 
 pub fn latest_release(owner: &str, repo: &str) -> Result<Option<Release>, String> {
     let url = format!("{}/repos/{owner}/{repo}/releases/latest", api_base());
+    let token = token();
     match with_retry(|| {
-        agent()
+        let req = agent()
             .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .call()
+            .header("Accept", "application/vnd.github+json");
+        match &token {
+            Some(t) => req.header("Authorization", &format!("Bearer {t}")).call(),
+            None => req.call(),
+        }
     }) {
         Ok(mut resp) => {
             let text = resp.body_mut().read_to_string().map_err(err)?;
@@ -141,14 +156,6 @@ pub fn tag_from_release_url(url: &str) -> Option<String> {
         .take_while(|c| !matches!(c, '/' | '?' | '#'))
         .collect();
     (!tag.is_empty()).then_some(tag)
-}
-
-/// Pick the AppImage for this machine from a list of asset names.
-pub fn pick_appimage<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    names.into_iter().find(|n| {
-        let low = n.to_lowercase();
-        n.ends_with(".AppImage") && arch_tokens().iter().any(|t| low.contains(t))
-    })
 }
 
 /// Download `url` to `dest`, reporting (done, total) bytes. Returns the SHA-256 hex digest.
@@ -211,9 +218,15 @@ pub fn download_verified(
     Ok(want.is_some())
 }
 
+#[cfg(unix)]
 pub fn set_executable(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).map_err(err)
+}
+
+#[cfg(windows)]
+pub fn set_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 /// The expected SHA-256 for `asset` from a `SHA256SUMS.txt` file, if listed.
@@ -296,17 +309,5 @@ mod tests {
             Some(h)
         );
         assert_eq!(parse_sums(&text, "missing"), None);
-    }
-
-    #[test]
-    fn appimage_choice() {
-        let names = [
-            "photocraft-0.5.0-linux-aarch64.AppImage",
-            "photocraft-0.5.0-linux-x86_64.AppImage",
-            "photocraft-0.5.0-linux-x86_64.AppImage.zsync",
-            "photocraft-0.5.0-linux-x86_64.deb",
-        ];
-        let pick = pick_appimage(names.iter().copied()).unwrap();
-        assert!(pick.ends_with(".AppImage") && pick.contains(arch_name()));
     }
 }

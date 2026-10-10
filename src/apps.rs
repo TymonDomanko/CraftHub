@@ -3,6 +3,15 @@
 /// GitHub owner of all the Crafting Apps.
 pub const OWNER: &str = "storytold";
 
+/// How a project names its release files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Naming {
+    /// `photocraft-0.5.0-windows-x64-portable.zip` and friends.
+    Crafting,
+    /// Tauri's `ArtCraft_0.32.0_x64-setup.exe` style.
+    Tauri,
+}
+
 pub struct App {
     /// Repository name and internal ID, e.g. `photocraft`.
     pub id: &'static str,
@@ -15,8 +24,9 @@ pub struct App {
     /// Path of the documentation inside the repo (the projects have no GitHub wiki).
     pub docs_path: &'static str,
     pub website: Option<&'static str>,
-    /// No Linux release: Install builds from source.
+    /// No Linux release: on Linux, Install builds it from source.
     pub source_build: bool,
+    pub naming: Naming,
     /// The app's own desktop ID / Wayland app_id.
     pub desktop_id: &'static str,
     /// Bundled icon (for ArtCraft, a stand-in shown until its own icon is downloaded).
@@ -75,6 +85,7 @@ pub static APPS: &[App] = &[
         docs_path: "book/src",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.photocraft",
         icon_png: icon!("photocraft"),
         icon_url: None,
@@ -89,6 +100,7 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.vectorcraft",
         icon_png: icon!("vectorcraft"),
         icon_url: None,
@@ -104,6 +116,7 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.designcraft",
         icon_png: icon!("designcraft"),
         icon_url: None,
@@ -119,6 +132,7 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.lightcraft",
         icon_png: icon!("lightcraft"),
         icon_url: None,
@@ -133,6 +147,7 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.filmcraft",
         icon_png: icon!("filmcraft"),
         icon_url: None,
@@ -148,6 +163,7 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.effectcraft",
         icon_png: icon!("effectcraft"),
         icon_url: None,
@@ -162,6 +178,7 @@ pub static APPS: &[App] = &[
         docs_path: "docs",
         website: None,
         source_build: false,
+        naming: Naming::Crafting,
         desktop_id: "ai.storyteller.pdfcraft",
         icon_png: icon!("pdfcraft"),
         icon_url: None,
@@ -176,6 +193,7 @@ pub static APPS: &[App] = &[
         docs_path: "_docs",
         website: Some("https://getartcraft.com/"),
         source_build: true,
+        naming: Naming::Tauri,
         desktop_id: "ai.artcraft.app",
         icon_png: icon!("artcraft"),
         // ArtCraft's logo is a trademark we don't redistribute; fetch it from their repo.

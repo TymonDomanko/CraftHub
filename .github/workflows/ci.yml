@@ -2,19 +2,86 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  lint:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
-      - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
+      - run: bash .github/scripts/install-rust.sh
       - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
-      - run: bash -n install.sh scripts/build-from-source.sh
+      - run: |
+          for f in install.sh scripts/*.sh packaging/macos/*.sh .github/scripts/*.sh; do bash -n "$f"; done
+
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x86_64, os: ubuntu-22.04, app: pdfcraft, app_name: PDFCraft }
+          - { name: Linux ARM64, os: ubuntu-22.04-arm, app: pdfcraft, app_name: PDFCraft }
+          - { name: Windows x86_64, os: windows-latest, app: pdfcraft, app_name: PDFCraft, extra: artcraft, extra_name: ArtCraft }
+          - { name: Windows ARM64, os: windows-11-arm, app: pdfcraft, app_name: PDFCraft }
+          - { name: macOS Apple silicon, os: macos-14, app: pdfcraft, app_name: PDFCraft, extra: artcraft, extra_name: ArtCraft }
+          - { name: macOS Intel, os: macos-15-intel, app: pdfcraft, app_name: PDFCraft }
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Authenticated GitHub API calls, so shared runners don't hit the rate limit.
+      CRAFTHUB_GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash .github/scripts/install-rust.sh
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test --locked
+      - name: Build
+        run: cargo build --locked
+      - name: End-to-end (${{ matrix.app_name }})
+        run: |
+          bin=target/debug/crafthub
+          [ "$RUNNER_OS" = Windows ] && bin=target/debug/crafthub.exe
+          bash .github/scripts/e2e.sh "$bin" "${{ matrix.app }}" "${{ matrix.app_name }}"
+      - name: End-to-end (${{ matrix.extra_name }})
+        if: matrix.extra
+        run: |
+          bin=target/debug/crafthub
+          [ "$RUNNER_OS" = Windows ] && bin=target/debug/crafthub.exe
+          bash .github/scripts/e2e.sh "$bin" "${{ matrix.extra }}" "${{ matrix.extra_name }}"
+      - name: Screenshot
+        if: runner.os != 'Linux'
+        continue-on-error: true
+        run: |
+          bin=target/debug/crafthub
+          [ "$RUNNER_OS" = Windows ] && bin=target/debug/crafthub.exe
+          bash .github/scripts/screenshot.sh "$bin" screenshot.png
+      - uses: actions/upload-artifact@v4
+        if: runner.os != 'Linux'
+        continue-on-error: true
+        with:
+          name: screenshot-${{ matrix.os }}
+          path: screenshot.png
+          if-no-files-found: ignore
+
+  macos-bundle:
+    name: macOS app bundle
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash .github/scripts/install-rust.sh
+      - run: bash packaging/macos/bundle.sh dist
+      - name: Check the bundle
+        run: |
+          cd dist && rm -rf check && mkdir check && ditto -x -k crafthub-macos-universal.zip check
+          "check/Craft Hub.app/Contents/MacOS/crafthub" --version
+          plutil -lint "check/Craft Hub.app/Contents/Info.plist"

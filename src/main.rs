@@ -1,16 +1,20 @@
-//! Craft Hub: a Creative-Cloud-style manager for the ArtCraft "Crafting Apps" on Linux.
+//! Craft Hub: a Creative-Cloud-style manager for the ArtCraft "Crafting Apps".
 //! One-click install, update and uninstall for PhotoCraft, VectorCraft, DesignCraft,
-//! LightCraft, FilmCraft, EffectCraft, PDFCraft and ArtCraft.
+//! LightCraft, FilmCraft, EffectCraft, PDFCraft and ArtCraft on Linux, Windows and macOS.
+
+// A windowed program on Windows (no console window); command-line use still prints.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod apps;
 mod github;
 mod hub;
 mod install;
 mod paths;
+mod platform;
 mod state;
 mod ui;
 
-use std::path::Path;
+use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -21,11 +25,14 @@ Craft Hub: install, update and uninstall the Crafting Apps.
 
 Usage:
   crafthub                          Open the window
-  crafthub --install-self           Install Craft Hub for this user (menu entry + ~/.local/bin/crafthub)
-  crafthub --uninstall-self [--all] Remove Craft Hub (--all also removes every app it installed)
+  crafthub --install ID             Install an app (e.g. photocraft)
+  crafthub --update ID|all          Update an app, or every installed app
+  crafthub --uninstall ID           Uninstall an app
+  crafthub --open ID                Open an installed app
   crafthub --list                   Show installed apps
   crafthub --check                  Show the latest release of each app
-  crafthub --register ID PATH VER   Install a locally built app (used by the ArtCraft source build)
+  crafthub --install-self           Install Craft Hub for this user
+  crafthub --uninstall-self [--all] Remove Craft Hub (--all also removes every app it installed)
   crafthub --version
 ";
 
@@ -34,8 +41,97 @@ fn fail(msg: impl std::fmt::Display) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// On Windows, a windowed program has no console: borrow the one it was started from
+/// (if any) so command-line output shows up.
+#[cfg(windows)]
+fn attach_console() {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE,
+    };
+    // SAFETY: plain Win32 calls with constant arguments.
+    unsafe {
+        let out = GetStdHandle(STD_OUTPUT_HANDLE);
+        if out.is_null() || out == INVALID_HANDLE_VALUE {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
+fn app_arg(id: &str) -> Result<&'static apps::App, ExitCode> {
+    apps::by_id(&id.to_lowercase()).ok_or_else(|| {
+        let ids: Vec<&str> = apps::APPS.iter().map(|a| a.id).collect();
+        fail(format!(
+            "unknown app \"{id}\" (choose from: {})",
+            ids.join(", ")
+        ))
+    })
+}
+
+fn cli_progress(done: u64, total: u64) {
+    if total > 0 {
+        eprint!(
+            "\r  {:>5.1} / {:.1} MB",
+            done as f64 / 1e6,
+            total as f64 / 1e6
+        );
+        let _ = std::io::stderr().flush();
+    }
+}
+
+/// Install or update one app from the command line.
+fn cli_install(app: &apps::App, update_only: bool) -> Result<String, String> {
+    let installed = state::installed(app.id);
+    if update_only && installed.is_none() {
+        return Ok(format!("{} isn't installed", app.name));
+    }
+    let rel = install::latest_for(app)?.ok_or("No releases yet")?;
+    if rel.asset.is_none() {
+        return Err(format!(
+            "{}'s latest release has no build for {}",
+            app.name,
+            platform::NAME
+        ));
+    }
+    if let Some(i) = &installed
+        && !i.source
+        && i.version == rel.tag()
+    {
+        return Ok(format!("{} is up to date ({})", app.name, rel.tag()));
+    }
+    eprintln!(
+        "{} {} {}…",
+        if installed.is_some() {
+            "Updating"
+        } else {
+            "Installing"
+        },
+        app.name,
+        rel.tag()
+    );
+    let result = install::install_release(app, &rel, &cli_progress);
+    eprintln!();
+    result?;
+    let path = state::installed(app.id).map(|i| i.path).unwrap_or_default();
+    Ok(format!("{} {} is installed: {path}", app.name, rel.tag()))
+}
+
+fn report(result: Result<String, String>) -> ExitCode {
+    match result {
+        Ok(msg) => {
+            println!("{msg}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(e),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(windows)]
+    if !args.is_empty() {
+        attach_console();
+    }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         [] => run_gui(),
@@ -47,6 +143,36 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
+        ["--install", id] => match app_arg(id) {
+            Ok(app) => report(cli_install(app, false)),
+            Err(code) => code,
+        },
+        ["--update", "all"] => {
+            let mut code = ExitCode::SUCCESS;
+            for app in apps::APPS {
+                if state::installed(app.id).is_some()
+                    && let Err(e) = cli_install(app, true).map(|m| println!("{m}"))
+                {
+                    code = fail(format!("{}: {e}", app.name));
+                }
+            }
+            code
+        }
+        ["--update", id] => match app_arg(id) {
+            Ok(app) => report(cli_install(app, true)),
+            Err(code) => code,
+        },
+        ["--uninstall", id] => match app_arg(id) {
+            Ok(app) if state::load().contains_key(app.id) => {
+                report(install::uninstall(app).map(|_| format!("Uninstalled {}", app.name)))
+            }
+            Ok(app) => report(Ok(format!("{} isn't installed", app.name))),
+            Err(code) => code,
+        },
+        ["--open", id] => match app_arg(id) {
+            Ok(app) => report(install::launch(app).map(|_| format!("Opened {}", app.name))),
+            Err(code) => code,
+        },
         ["--install-self"] => match hub::install_self() {
             Ok(path) => {
                 println!(
@@ -54,7 +180,7 @@ fn main() -> ExitCode {
                     hub::VERSION,
                     path.display()
                 );
-                println!("Open it from your menu (search \"Craft Hub\") or run: crafthub");
+                println!("Open it from your menu, Start Menu or Applications folder.");
                 ExitCode::SUCCESS
             }
             Err(e) => fail(e),
@@ -93,9 +219,10 @@ fn main() -> ExitCode {
                         "{:<12} {:<20} {}",
                         app.name,
                         r.tag(),
-                        r.appimage
-                            .as_ref()
-                            .map_or("(no Linux AppImage)", |(n, _)| n.as_str())
+                        r.asset.as_ref().map_or_else(
+                            || format!("(no build for {} {})", platform::NAME, github::arch_name()),
+                            |a| a.name.clone()
+                        )
                     ),
                     Ok(None) => println!("{:<12} no releases", app.name),
                     Err(e) => println!("{:<12} error: {e}", app.name),
@@ -103,18 +230,14 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        ["--register", id, path, version] => {
-            let Some(app) = apps::by_id(id) else {
-                return fail(format!("unknown app {id}"));
-            };
-            match install::register_local(app, Path::new(path), version) {
-                Ok(()) => {
-                    println!("Installed {} {version} from {path}", app.name);
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
+        #[cfg(target_os = "linux")]
+        ["--register", id, path, version] => match app_arg(id) {
+            Ok(app) => report(
+                platform::register_local(app, std::path::Path::new(path), version)
+                    .map(|_| format!("Installed {} {version} from {path}", app.name)),
+            ),
+            Err(code) => code,
+        },
         _ => {
             eprint!("{USAGE}");
             ExitCode::from(2)
@@ -123,18 +246,13 @@ fn main() -> ExitCode {
 }
 
 fn run_gui() -> ExitCode {
-    // First run (or running a downloaded copy): put Craft Hub in the menu.
-    let running_installed = std::env::current_exe()
-        .ok()
-        .and_then(|e| std::fs::canonicalize(e).ok())
-        .is_some_and(|e| std::fs::canonicalize(paths::installed_hub_binary()).ok() == Some(e));
-    if (!running_installed || !hub::is_self_installed())
+    // First run (or running a downloaded copy): install Craft Hub for this user.
+    if (!platform::running_installed_copy() || !platform::is_self_installed())
         && let Err(e) = hub::install_self()
     {
-        eprintln!("crafthub: couldn't add Craft Hub to the menu: {e}");
+        eprintln!("crafthub: couldn't install Craft Hub: {e}");
     }
-    install::cleanup_orphans();
-    install::migrate_entries();
+    platform::startup();
 
     let (rgba, width, height) = ui::decode_png(hub::ICON_PNG);
     let options = eframe::NativeOptions {
