@@ -47,7 +47,10 @@ say "uninstall $APP"
 [ ! -e "$path" ] || die "$path is still there"
 case "$RUNNER_OS" in
   Linux) test ! -f "$HOME/.local/share/applications/ai.storyteller.$APP.desktop" || die "menu entry left behind" ;;
-  Windows) test ! -f "$(native "$APPDATA")/Microsoft/Windows/Start Menu/Programs/$NAME.lnk" || die "shortcut left behind" ;;
+  Windows)
+    test ! -f "$(native "$APPDATA")/Microsoft/Windows/Start Menu/Programs/$NAME.lnk" || die "shortcut left behind"
+    test ! -f "$(native "$USERPROFILE")/Desktop/$NAME.lnk" || die "Desktop shortcut left behind"
+    ;;
 esac
 
 say "delete $APP's own settings (clean uninstall)"
