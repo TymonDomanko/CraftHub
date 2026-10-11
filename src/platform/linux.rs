@@ -7,6 +7,8 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
+use std::thread;
+use std::time::Duration;
 
 use crate::apps::{self, APPS, App};
 use crate::github;
@@ -112,28 +114,30 @@ fn desktop_path(desktop_id: &str) -> PathBuf {
 
 /// Ask the desktop to reload menus and icons.
 fn refresh_menus() {
-    let jobs: [(&str, Vec<String>); 2] = [
-        (
-            "update-desktop-database",
-            vec!["-q".into(), desktop_dir().display().to_string()],
-        ),
-        (
-            "gtk-update-icon-cache",
-            vec![
-                "-q".into(),
-                "-t".into(),
-                "-f".into(),
-                hicolor_dir().display().to_string(),
-            ],
-        ),
-    ];
-    for (cmd, args) in jobs {
-        let _ = Command::new(cmd)
-            .args(args)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
+    refresh_menu_database();
+    refresh_icon_cache();
+}
+
+fn run_quietly(cmd: &str, args: &[&str]) {
+    let _ = Command::new(cmd)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+fn refresh_menu_database() {
+    run_quietly(
+        "update-desktop-database",
+        &["-q", &desktop_dir().to_string_lossy()],
+    );
+}
+
+fn refresh_icon_cache() {
+    run_quietly(
+        "gtk-update-icon-cache",
+        &["-q", "-t", "-f", &hicolor_dir().to_string_lossy()],
+    );
 }
 
 /// Write the app's menu entry and icon. Named after the app's own ID so there's one
@@ -236,14 +240,54 @@ fn migrate_entries() {
 pub fn startup() {
     cleanup_orphans();
     migrate_entries();
-    replace_user_copy();
+    if packaged() && user_copy_exists() {
+        // In the background, after the window and its taskbar icon are up.
+        thread::spawn(|| {
+            thread::sleep(Duration::from_secs(5));
+            replace_user_copy();
+        });
+    }
+}
+
+fn user_copy_icons() -> [PathBuf; 2] {
+    [
+        hicolor_dir().join("scalable/apps/crafthub.svg"),
+        icon_dir().join("crafthub.png"),
+    ]
+}
+
+fn user_copy_exists() -> bool {
+    installed_hub_path().exists()
+        || hub_desktop_file().exists()
+        || user_copy_icons().iter().any(|p| p.exists())
 }
 
 /// Installed through Software Manager after a per-user install: drop the per-user copy,
 /// whose menu entry would otherwise hide the packaged one.
+///
+/// The icons go first and the menu entry only several seconds later. The desktop (GTK,
+/// and Cinnamon's copy of its icon code) re-checks icon folders at most every 5 seconds
+/// and until then still points at the deleted per-user icon. Removing the menu entry
+/// makes the menu reload it straight away, so doing both at once left Craft Hub with a
+/// blank icon in the menu until the next login.
 fn replace_user_copy() {
-    if packaged() && (installed_hub_path().exists() || hub_desktop_file().exists()) {
-        remove_user_copy();
+    if !packaged() {
+        return;
+    }
+    let _ = fs::remove_file(installed_hub_path());
+    let icons = user_copy_icons();
+    if icons.iter().any(|p| p.exists()) {
+        for p in &icons {
+            let _ = fs::remove_file(p);
+        }
+        refresh_icon_cache();
+        if hub_desktop_file().exists() {
+            thread::sleep(Duration::from_secs(7));
+        }
+    }
+    if hub_desktop_file().exists() {
+        let _ = fs::remove_file(hub_desktop_file());
+        refresh_menu_database();
     }
 }
 
@@ -512,8 +556,9 @@ pub fn is_self_installed() -> bool {
 /// Remove the per-user copy: `~/.local/bin/crafthub`, its menu entry and icons.
 fn remove_user_copy() {
     let _ = fs::remove_file(hub_desktop_file());
-    let _ = fs::remove_file(hicolor_dir().join("scalable/apps/crafthub.svg"));
-    let _ = fs::remove_file(icon_dir().join("crafthub.png"));
+    for p in user_copy_icons() {
+        let _ = fs::remove_file(p);
+    }
     let _ = fs::remove_file(installed_hub_path());
     refresh_menus();
 }
