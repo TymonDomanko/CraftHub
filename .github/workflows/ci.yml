@@ -45,6 +45,19 @@ jobs:
       CRAFTHUB_GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
+      # The apps' recent release notes, published to a branch as test data for the
+      # changelog parser (whose output is published there too, further down).
+      - name: Collect the apps' release notes
+        if: matrix.os == 'ubuntu-22.04' && github.event_name == 'push'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p notes
+          for app in photocraft vectorcraft designcraft lightcraft filmcraft effectcraft pdfcraft artcraft; do
+            gh api "repos/storytold/$app/releases?per_page=20" > "notes/$app.json"
+          done
+          ls -la notes
       - run: bash .github/scripts/install-rust.sh
       - name: Clippy
         run: bash .github/scripts/run.sh clippy cargo clippy --locked --all-targets -- -D warnings
@@ -63,6 +76,22 @@ jobs:
           bin=target/debug/crafthub
           [ "$RUNNER_OS" = Windows ] && bin=target/debug/crafthub.exe
           bash .github/scripts/run.sh e2e bash .github/scripts/e2e.sh "$bin" "${{ matrix.extra }}" "${{ matrix.extra_name }}"
+      - name: Changelogs and release notes
+        if: matrix.os == 'ubuntu-22.04' && github.event_name == 'push'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          for app in photocraft vectorcraft designcraft lightcraft filmcraft effectcraft pdfcraft artcraft; do
+            target/debug/crafthub --changelog "$app" > "notes/$app.txt" 2>&1 || true
+          done
+          cd notes
+          git init -q -b main
+          git add .
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com \
+            commit -q -m "Release notes and parsed changelogs (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY" \
+            "HEAD:refs/heads/ci-screenshots/release-notes"
       - name: Screenshot
         if: runner.os != 'Linux'
         continue-on-error: true
