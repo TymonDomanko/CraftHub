@@ -1,0 +1,16 @@
+Craft Hub: install, update and uninstall the Crafting Apps.
+
+Usage:
+  crafthub                          Open the window
+  crafthub --install ID             Install an app (e.g. photocraft)
+  crafthub --update ID|all          Update an app, or every installed app
+  crafthub --uninstall ID           Uninstall an app
+  crafthub --open ID                Open an installed app
+  crafthub --list                   Show installed apps
+  crafthub --check                  Show the latest release of each app
+  crafthub --install-self           Install Craft Hub for this user
+  crafthub --delete-data ID         Delete an uninstalled app's settings and saved data
+  crafthub --uninstall-self [--all] [--purge]
+                                    Remove Craft Hub; --all also uninstalls every app it
+                                    installed, --purge also deletes their settings
+  crafthub --version
